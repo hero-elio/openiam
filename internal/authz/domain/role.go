@@ -44,10 +44,10 @@ func (r *Role) GrantPermission(p Permission) error {
 	}
 	r.Permissions = append(r.Permissions, p)
 	r.RecordEvent(PermissionGrantedEvent{
-		RoleID:     r.ID,
-		Resource:   p.Resource,
-		Action:     p.Action,
-		Timestamp:  time.Now(),
+		RoleID:    r.ID,
+		Resource:  p.Resource,
+		Action:    p.Action,
+		Timestamp: time.Now(),
 	})
 	return nil
 }

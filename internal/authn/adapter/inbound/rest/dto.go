@@ -22,6 +22,11 @@ type ChallengeRequest struct {
 	Params   json.RawMessage `json:"params,omitempty"`
 }
 
+type BindCredentialRequest struct {
+	Provider string          `json:"provider"`
+	Params   json.RawMessage `json:"params"`
+}
+
 type ChallengeResponse struct {
 	ChallengeID string         `json:"challenge_id"`
 	Provider    string         `json:"provider"`

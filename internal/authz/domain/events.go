@@ -20,7 +20,7 @@ type RoleCreatedEvent struct {
 	Timestamp time.Time
 }
 
-func (e RoleCreatedEvent) EventName() string    { return EventRoleCreated }
+func (e RoleCreatedEvent) EventName() string     { return EventRoleCreated }
 func (e RoleCreatedEvent) OccurredAt() time.Time { return e.Timestamp }
 func (e RoleCreatedEvent) AggregateID() string   { return e.RoleID.String() }
 
@@ -31,7 +31,7 @@ type PermissionGrantedEvent struct {
 	Timestamp time.Time
 }
 
-func (e PermissionGrantedEvent) EventName() string    { return EventPermissionGranted }
+func (e PermissionGrantedEvent) EventName() string     { return EventPermissionGranted }
 func (e PermissionGrantedEvent) OccurredAt() time.Time { return e.Timestamp }
 func (e PermissionGrantedEvent) AggregateID() string   { return e.RoleID.String() }
 
@@ -43,6 +43,6 @@ type RoleAssignedEvent struct {
 	Timestamp time.Time
 }
 
-func (e RoleAssignedEvent) EventName() string    { return EventRoleAssigned }
+func (e RoleAssignedEvent) EventName() string     { return EventRoleAssigned }
 func (e RoleAssignedEvent) OccurredAt() time.Time { return e.Timestamp }
 func (e RoleAssignedEvent) AggregateID() string   { return e.RoleID.String() }

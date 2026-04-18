@@ -37,4 +37,6 @@ var (
 	ErrChallengeNotSupported = errors.New("challenge not supported for this provider")
 	ErrChallengeNotFound     = errors.New("challenge not found or expired")
 	ErrChallengeInvalid      = errors.New("invalid challenge response")
+
+	ErrCredentialAlreadyBound = errors.New("credential already bound to a user")
 )

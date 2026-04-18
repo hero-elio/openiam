@@ -2,6 +2,7 @@ package iam
 
 import (
 	"context"
+
 	authnDomain "openiam/internal/authn/domain"
 	identityApp "openiam/internal/identity/application"
 	identityCommand "openiam/internal/identity/application/command"
@@ -9,8 +10,8 @@ import (
 	shared "openiam/internal/shared/domain"
 )
 
-// identityBridgeAdapter implements authnDomain.UserInfoProvider and authnDomain.UserRegistrar
-// by delegating to the identity bounded context.
+// identityBridgeAdapter implements authnDomain.UserInfoProvider, authnDomain.UserRegistrar,
+// and authnDomain.ExternalIdentityProvider by delegating to the identity bounded context.
 type identityBridgeAdapter struct {
 	svc *identityApp.IdentityService
 }
@@ -39,4 +40,28 @@ func (a *identityBridgeAdapter) Register(ctx context.Context, req *authnDomain.R
 		return "", err
 	}
 	return uid.String(), nil
+}
+
+func (a *identityBridgeAdapter) EnsureExternalUser(ctx context.Context, req *authnDomain.EnsureExternalUserRequest) (*authnDomain.UserInfo, error) {
+	tenantID := req.TenantID
+	if tenantID == "" {
+		tenantID = "default"
+	}
+
+	uid, err := a.svc.RegisterExternalUser(ctx, &identityCommand.RegisterExternalUser{
+		AppID:             req.AppID.String(),
+		TenantID:          string(tenantID),
+		Provider:          req.Provider,
+		CredentialSubject: req.CredentialSubject,
+		PublicKey:         req.PublicKey,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return &authnDomain.UserInfo{
+		UserID:   uid,
+		TenantID: tenantID,
+		Status:   "active",
+	}, nil
 }

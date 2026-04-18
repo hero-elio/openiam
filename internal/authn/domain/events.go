@@ -20,7 +20,7 @@ type UserLoggedInEvent struct {
 	Timestamp time.Time
 }
 
-func (e UserLoggedInEvent) EventName() string    { return EventUserLoggedIn }
+func (e UserLoggedInEvent) EventName() string     { return EventUserLoggedIn }
 func (e UserLoggedInEvent) OccurredAt() time.Time { return e.Timestamp }
 func (e UserLoggedInEvent) AggregateID() string   { return e.UserID.String() }
 
@@ -30,7 +30,7 @@ type UserLoggedOutEvent struct {
 	Timestamp time.Time
 }
 
-func (e UserLoggedOutEvent) EventName() string    { return EventUserLoggedOut }
+func (e UserLoggedOutEvent) EventName() string     { return EventUserLoggedOut }
 func (e UserLoggedOutEvent) OccurredAt() time.Time { return e.Timestamp }
 func (e UserLoggedOutEvent) AggregateID() string   { return e.UserID.String() }
 
@@ -40,6 +40,6 @@ type TokenRefreshedEvent struct {
 	Timestamp time.Time
 }
 
-func (e TokenRefreshedEvent) EventName() string    { return EventTokenRefreshed }
+func (e TokenRefreshedEvent) EventName() string     { return EventTokenRefreshed }
 func (e TokenRefreshedEvent) OccurredAt() time.Time { return e.Timestamp }
 func (e TokenRefreshedEvent) AggregateID() string   { return e.UserID.String() }

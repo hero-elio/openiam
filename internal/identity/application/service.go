@@ -73,6 +73,31 @@ func (s *IdentityService) RegisterUser(ctx context.Context, cmd *command.Registe
 	return user.ID, nil
 }
 
+func (s *IdentityService) RegisterExternalUser(ctx context.Context, cmd *command.RegisterExternalUser) (shared.UserID, error) {
+	tenantID := shared.TenantID(cmd.TenantID)
+	if tenantID == "" {
+		tenantID = "default"
+	}
+	appID := shared.AppID(cmd.AppID)
+
+	user := domain.NewExternalUser(tenantID, appID, cmd.Provider, cmd.CredentialSubject, cmd.PublicKey)
+
+	if existing, err := s.userRepo.FindByEmail(ctx, tenantID, user.Email); err == nil {
+		return existing.ID, nil
+	}
+
+	if err := s.txManager.Execute(ctx, func(txCtx context.Context) error {
+		if err := s.userRepo.Save(txCtx, user); err != nil {
+			return err
+		}
+		return s.eventBus.Publish(txCtx, user.PullEvents()...)
+	}); err != nil {
+		return "", err
+	}
+
+	return user.ID, nil
+}
+
 func (s *IdentityService) GetUser(ctx context.Context, q *query.GetUser) (*UserDTO, error) {
 	user, err := s.userRepo.FindByID(ctx, shared.UserID(q.UserID))
 	if err != nil {

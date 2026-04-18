@@ -1,0 +1,31 @@
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  margin: 24px;
+  max-width: 960px;
+}
+h1 { margin-bottom: 8px; }
+p { color: #444; }
+.card {
+  border: 1px solid #ddd;
+  border-radius: 10px;
+  padding: 14px;
+  margin-bottom: 12px;
+}
+.row {
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  gap: 8px;
+  margin: 6px 0;
+  align-items: center;
+}
+input, textarea { width: 100%; box-sizing: border-box; padding: 8px; }
+button { padding: 8px 12px; margin-right: 8px; cursor: pointer; }
+pre {
+  background: #111;
+  color: #d4d4d4;
+  padding: 12px;
+  border-radius: 8px;
+  overflow-x: auto;
+  min-height: 120px;
+}
+.hint { font-size: 12px; color: #666; margin-top: 6px; }

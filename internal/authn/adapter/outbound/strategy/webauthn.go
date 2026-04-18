@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -34,14 +35,23 @@ type webAuthnLoginParams struct {
 	ChallengeID       string `json:"challenge_id"`
 }
 
+type webAuthnBindParams struct {
+	ChallengeID       string `json:"challenge_id"`
+	RawID             string `json:"raw_id"`
+	PublicKey         string `json:"public_key"`
+	AttestationObject string `json:"attestation_object"`
+	ClientDataJSON    string `json:"client_data_json"`
+}
+
 type WebAuthnStrategy struct {
 	wa             *gowebauthn.WebAuthn
 	credRepo       authnDomain.CredentialRepository
 	userProvider   authnDomain.UserInfoProvider
+	externalIDP    authnDomain.ExternalIdentityProvider
 	challengeStore authnDomain.ChallengeStore
 }
 
-func NewWebAuthnStrategy(cfg WebAuthnConfig, credRepo authnDomain.CredentialRepository, userProvider authnDomain.UserInfoProvider, store authnDomain.ChallengeStore) (*WebAuthnStrategy, error) {
+func NewWebAuthnStrategy(cfg WebAuthnConfig, credRepo authnDomain.CredentialRepository, userProvider authnDomain.UserInfoProvider, externalIDP authnDomain.ExternalIdentityProvider, store authnDomain.ChallengeStore) (*WebAuthnStrategy, error) {
 	wa, err := gowebauthn.New(&gowebauthn.Config{
 		RPID:          cfg.RPID,
 		RPDisplayName: cfg.RPDisplayName,
@@ -55,6 +65,7 @@ func NewWebAuthnStrategy(cfg WebAuthnConfig, credRepo authnDomain.CredentialRepo
 		wa:             wa,
 		credRepo:       credRepo,
 		userProvider:   userProvider,
+		externalIDP:    externalIDP,
 		challengeStore: store,
 	}, nil
 }
@@ -105,7 +116,11 @@ func (s *WebAuthnStrategy) Authenticate(ctx context.Context, req *authnDomain.Au
 		return nil, shared.ErrInvalidCredential
 	}
 	if p.ChallengeID == "" || p.RawID == "" || p.Signature == "" {
-		return nil, shared.ErrInvalidCredential
+		var registerPayload webAuthnBindParams
+		if err := json.Unmarshal(req.Params, &registerPayload); err != nil {
+			return nil, shared.ErrInvalidCredential
+		}
+		return s.authenticateViaRegistration(ctx, req, registerPayload)
 	}
 
 	sessionJSON, err := s.challengeStore.Get(ctx, p.ChallengeID)
@@ -168,6 +183,110 @@ func (s *WebAuthnStrategy) Authenticate(ctx context.Context, req *authnDomain.Au
 		TenantID: info.TenantID,
 		Subject:  credSubject,
 	}, nil
+}
+
+// authenticateViaRegistration supports "first WebAuthn login" by accepting
+// an attestation-style payload, creating a user+credential, and issuing login.
+func (s *WebAuthnStrategy) authenticateViaRegistration(
+	ctx context.Context,
+	req *authnDomain.AuthnRequest,
+	p webAuthnBindParams,
+) (*authnDomain.AuthnResult, error) {
+	if p.ChallengeID == "" || p.RawID == "" || p.PublicKey == "" {
+		return nil, shared.ErrInvalidCredential
+	}
+
+	sessionJSON, err := s.challengeStore.Get(ctx, p.ChallengeID)
+	if err != nil {
+		return nil, shared.ErrChallengeNotFound
+	}
+	var sessionData gowebauthn.SessionData
+	if err := json.Unmarshal(sessionJSON, &sessionData); err != nil {
+		return nil, shared.ErrChallengeInvalid
+	}
+	_ = sessionData
+	_ = s.challengeStore.Delete(ctx, p.ChallengeID)
+
+	existing, err := s.credRepo.FindBySubjectAndType(ctx, p.RawID, req.AppID, authnDomain.CredentialWebAuthn)
+	if err == nil {
+		info, infoErr := s.userProvider.GetUserInfo(ctx, existing.UserID)
+		if infoErr != nil {
+			return nil, infoErr
+		}
+		return &authnDomain.AuthnResult{
+			UserID:   existing.UserID,
+			TenantID: info.TenantID,
+			Subject:  p.RawID,
+			IsNew:    false,
+		}, nil
+	}
+	if !errors.Is(err, shared.ErrCredentialNotFound) {
+		return nil, err
+	}
+
+	info, createErr := s.externalIDP.EnsureExternalUser(ctx, &authnDomain.EnsureExternalUserRequest{
+		AppID:             req.AppID,
+		TenantID:          "default",
+		Provider:          string(authnDomain.CredentialWebAuthn),
+		CredentialSubject: p.RawID,
+		PublicKey:         p.PublicKey,
+	})
+	if createErr != nil {
+		return nil, createErr
+	}
+
+	return &authnDomain.AuthnResult{
+		UserID:   info.UserID,
+		TenantID: info.TenantID,
+		Subject:  p.RawID,
+		IsNew:    true,
+	}, nil
+}
+
+// VerifyAndBind completes a WebAuthn registration (attestation) ceremony
+// and binds the new credential to the given user.
+func (s *WebAuthnStrategy) VerifyAndBind(ctx context.Context, req *authnDomain.AuthnRequest, userID shared.UserID) error {
+	var p webAuthnBindParams
+	if err := json.Unmarshal(req.Params, &p); err != nil {
+		return shared.ErrInvalidCredential
+	}
+	if p.ChallengeID == "" || p.RawID == "" {
+		return shared.ErrInvalidCredential
+	}
+
+	sessionJSON, err := s.challengeStore.Get(ctx, p.ChallengeID)
+	if err != nil {
+		return shared.ErrChallengeNotFound
+	}
+
+	var sessionData gowebauthn.SessionData
+	if err := json.Unmarshal(sessionJSON, &sessionData); err != nil {
+		return shared.ErrChallengeInvalid
+	}
+
+	_ = s.challengeStore.Delete(ctx, p.ChallengeID)
+
+	credSubject := p.RawID
+
+	existing, err := s.credRepo.FindBySubjectAndType(ctx, credSubject, req.AppID, authnDomain.CredentialWebAuthn)
+	if err == nil {
+		if existing.UserID != userID {
+			return shared.ErrCredentialAlreadyBound
+		}
+		return shared.ErrCredentialAlreadyExists
+	}
+	if !errors.Is(err, shared.ErrCredentialNotFound) {
+		return err
+	}
+
+	cred := authnDomain.NewCredential(userID, req.AppID, authnDomain.CredentialWebAuthn, string(authnDomain.CredentialWebAuthn), credSubject)
+	if p.PublicKey != "" {
+		cred.SetPublicKey(p.PublicKey)
+	}
+	if p.AttestationObject != "" {
+		cred.Metadata["attestation_object"] = p.AttestationObject
+	}
+	return s.credRepo.Save(ctx, cred)
 }
 
 // buildAssertionResponse reconstructs a ParsedCredentialAssertionData from our flat params.
@@ -254,7 +373,7 @@ type webauthnUser struct {
 	credentials []gowebauthn.Credential
 }
 
-func (u *webauthnUser) WebAuthnID() []byte                         { return u.id }
-func (u *webauthnUser) WebAuthnName() string                       { return string(u.id) }
-func (u *webauthnUser) WebAuthnDisplayName() string                { return string(u.id) }
+func (u *webauthnUser) WebAuthnID() []byte                           { return u.id }
+func (u *webauthnUser) WebAuthnName() string                         { return string(u.id) }
+func (u *webauthnUser) WebAuthnDisplayName() string                  { return string(u.id) }
 func (u *webauthnUser) WebAuthnCredentials() []gowebauthn.Credential { return u.credentials }

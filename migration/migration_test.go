@@ -196,13 +196,13 @@ func TestMigrations_InsertExampleData(t *testing.T) {
 
 	// Verify row counts
 	tables := map[string]int{
-		"users":          1,
-		"applications":   1,
-		"credentials":    1,
-		"roles":          1,
+		"users":            1,
+		"applications":     1,
+		"credentials":      1,
+		"roles":            1,
 		"role_permissions": 1,
-		"user_app_roles": 1,
-		"domain_events":  1,
+		"user_app_roles":   1,
+		"domain_events":    1,
 	}
 	for table, expected := range tables {
 		var count int

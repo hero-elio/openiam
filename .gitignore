@@ -44,5 +44,9 @@ deploy/docker/data/
 dist/
 bin/
 
+# Frontend
+web/authn-test/node_modules/
+web/authn-test/dist/
+
 # AI design docs
 docs/ai/

@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OpenIAM Authn Test</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <h1>OpenIAM 认证接口测试页</h1>
+    <p>
+      当前页面与 API 同源，可直接测试 <code>/api/v1/auth</code>。SIWE /
+      WebAuthn 需要后端开启对应 provider。
+    </p>
+
+    <div class="card">
+      <h3>基础参数</h3>
+      <div class="row"><label for="appId">app_id</label><input id="appId" value="default" /></div>
+      <div class="row"><label for="provider">provider</label><input id="provider" value="password" /></div>
+      <div class="row"><label for="email">email</label><input id="email" value="demo@example.com" /></div>
+      <div class="row"><label for="password">password</label><input id="password" type="password" value="12345678" /></div>
+      <div class="row"><label for="tenantId">tenant_id</label><input id="tenantId" value="default" /></div>
+    </div>
+
+    <div class="card">
+      <h3>Token 区</h3>
+      <div class="row"><label for="accessToken">access_token</label><textarea id="accessToken" rows="3"></textarea></div>
+      <div class="row"><label for="refreshToken">refresh_token</label><textarea id="refreshToken" rows="3"></textarea></div>
+      <div class="hint">注册/登录/刷新成功后会自动回填 token。</div>
+    </div>
+
+    <div class="card">
+      <h3>Password 操作</h3>
+      <button id="btnRegister">注册</button>
+      <button id="btnLogin">登录</button>
+      <button id="btnRefresh">刷新 Token</button>
+      <button id="btnSessions">查询会话</button>
+      <button id="btnLogout">登出当前会话</button>
+    </div>
+
+    <div class="card">
+      <h3>SIWE 测试</h3>
+      <div class="row"><label for="siweDomain">siwe domain</label><input id="siweDomain" value="localhost" /></div>
+      <div class="row"><label for="siweURI">siwe uri</label><input id="siweURI" value="http://localhost:8080" /></div>
+      <div class="row"><label for="siweChainID">chain id</label><input id="siweChainID" value="1" /></div>
+      <div class="row"><label for="siweStatement">statement</label><input id="siweStatement" value="Sign in to OpenIAM" /></div>
+      <div class="row"><label for="siweAddress">wallet address</label><input id="siweAddress" /></div>
+      <div class="row"><label for="siweNonce">nonce</label><input id="siweNonce" /></div>
+      <button id="btnSiweConnect">连接钱包</button>
+      <button id="btnSiweChallenge">获取 SIWE Challenge</button>
+      <button id="btnSiweLogin">签名并 SIWE 登录</button>
+      <button id="btnSiweBind">签名并绑定 SIWE 到当前账号</button>
+      <div class="hint">SIWE 首次登录会自动创建新用户；绑定需先用密码登录拿到 token。</div>
+    </div>
+
+    <div class="card">
+      <h3>WebAuthn 测试</h3>
+      <div class="row"><label for="webauthnChallengeId">challenge_id</label><input id="webauthnChallengeId" /></div>
+      <button id="btnWebAuthnChallenge">获取 WebAuthn Challenge</button>
+      <button id="btnWebAuthnLogin">调用浏览器凭证并登录</button>
+      <button id="btnWebAuthnBind">绑定 WebAuthn/Passkey 到当前账号</button>
+      <div class="hint">需要 HTTPS 或 localhost；绑定需先用密码登录拿到 token。</div>
+    </div>
+
+    <div class="card">
+      <h3>响应</h3>
+      <pre id="output"></pre>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

@@ -1,6 +1,9 @@
 package domain
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"time"
 
 	shared "openiam/internal/shared/domain"
@@ -52,6 +55,32 @@ func NewUser(email Email, rawPassword string, tenantID shared.TenantID, appID sh
 		Timestamp:         now,
 	})
 	return u, nil
+}
+
+// NewExternalUser creates a user from an external identity (e.g. wallet address).
+// No password is set. The credential subject is used as the identity anchor.
+func NewExternalUser(tenantID shared.TenantID, appID shared.AppID, provider, credentialSubject, publicKey string) *User {
+	now := time.Now()
+	hash := sha256.Sum256([]byte(provider + ":" + credentialSubject))
+	placeholderEmail := NewEmailFromTrusted(fmt.Sprintf("%s@external.openiam.local", hex.EncodeToString(hash[:8])))
+	u := &User{
+		ID:        shared.NewUserID(),
+		Email:     placeholderEmail,
+		Status:    UserStatusActive,
+		TenantID:  tenantID,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	u.RecordEvent(UserRegisteredEvent{
+		UserID:            u.ID,
+		AppID:             appID,
+		Provider:          provider,
+		CredentialSubject: credentialSubject,
+		PublicKey:         publicKey,
+		TenantID:          tenantID,
+		Timestamp:         now,
+	})
+	return u
 }
 
 func (u *User) Activate() error {

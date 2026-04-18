@@ -127,7 +127,7 @@ func New(cfg Config, logger *slog.Logger) (*Engine, error) {
 	if cfg.SIWEDomain != "" {
 		authnOpts = append(authnOpts, authnApp.WithSIWEAuth(
 			authnStrategy.SIWEConfig{Domain: cfg.SIWEDomain},
-			credRepo, identityAdapter, challengeStore,
+			credRepo, identityAdapter, identityAdapter, challengeStore,
 		))
 	}
 
@@ -138,7 +138,7 @@ func New(cfg Config, logger *slog.Logger) (*Engine, error) {
 				RPDisplayName: cfg.WebAuthnRPName,
 				RPOrigins:     cfg.WebAuthnRPOrigins,
 			},
-			credRepo, identityAdapter, challengeStore,
+			credRepo, identityAdapter, identityAdapter, challengeStore,
 		))
 	}
 
@@ -179,6 +179,8 @@ func New(cfg Config, logger *slog.Logger) (*Engine, error) {
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(30 * time.Second))
+
+	r.Mount("/__test/authn", http.StripPrefix("/__test/authn", testAuthnPageHandler()))
 
 	r.Route("/api/v1", func(api chi.Router) {
 		api.Mount("/users", identityHandler.Routes())

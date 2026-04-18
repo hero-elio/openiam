@@ -223,6 +223,23 @@ func (s *AuthnAppService) ListSessions(ctx context.Context, userID string) ([]*S
 	return result, nil
 }
 
+func (s *AuthnAppService) BindCredential(ctx context.Context, cmd *command.BindCredential) error {
+	strategy, ok := s.strategies[domain.CredentialType(cmd.Provider)]
+	if !ok {
+		return shared.ErrUnsupportedProvider
+	}
+
+	bindable, ok := strategy.(domain.BindableStrategy)
+	if !ok {
+		return fmt.Errorf("provider %q does not support credential binding", cmd.Provider)
+	}
+
+	return bindable.VerifyAndBind(ctx, &domain.AuthnRequest{
+		AppID:  shared.AppID(cmd.AppID),
+		Params: cmd.Params,
+	}, shared.UserID(cmd.UserID))
+}
+
 func (s *AuthnAppService) Register(ctx context.Context, cmd *command.Register) (*domain.TokenPair, error) {
 	if s.registrar == nil {
 		return nil, fmt.Errorf("user registrar not configured")

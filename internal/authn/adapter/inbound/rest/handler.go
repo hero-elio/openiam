@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -44,6 +45,7 @@ func (h *Handler) Routes() chi.Router {
 
 	r.Group(func(r chi.Router) {
 		r.Use(h.AuthMiddleware)
+		r.Post("/bind", h.handleBindCredential)
 		r.Post("/logout", h.handleLogout)
 		r.Get("/sessions", h.handleListSessions)
 		r.Delete("/sessions/{id}", h.handleRevokeSession)
@@ -133,6 +135,7 @@ func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
 		IPAddress: realIP(r),
 	})
 	if err != nil {
+		slog.ErrorContext(r.Context(), "login failed", "provider", provider, "error", err)
 		writeBusinessError(w, err)
 		return
 	}
@@ -173,6 +176,34 @@ func (h *Handler) handleChallenge(w http.ResponseWriter, r *http.Request) {
 		Data:        resp.Data,
 		ExpiresAt:   resp.ExpiresAt.Format(time.RFC3339),
 	})
+}
+
+func (h *Handler) handleBindCredential(w http.ResponseWriter, r *http.Request) {
+	userID, _ := r.Context().Value(ctxUserID).(string)
+	appID, _ := r.Context().Value(ctxAppID).(string)
+
+	var req BindCredentialRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "invalid request body")
+		return
+	}
+
+	if req.Provider == "" {
+		writeError(w, http.StatusBadRequest, "invalid_argument", "provider is required")
+		return
+	}
+
+	if err := h.svc.BindCredential(r.Context(), &command.BindCredential{
+		UserID:   userID,
+		AppID:    appID,
+		Provider: req.Provider,
+		Params:   req.Params,
+	}); err != nil {
+		writeBusinessError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *Handler) handleLogout(w http.ResponseWriter, r *http.Request) {
@@ -276,7 +307,9 @@ func writeBusinessError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, shared.ErrInvalidCredential), errors.Is(err, shared.ErrInvalidPassword):
 		writeError(w, http.StatusUnauthorized, "invalid_credentials", "invalid credentials")
-	case errors.Is(err, shared.ErrUserNotFound), errors.Is(err, shared.ErrCredentialNotFound):
+	case errors.Is(err, shared.ErrCredentialNotFound):
+		writeError(w, http.StatusNotFound, "credential_not_found", "credential not found, registration required")
+	case errors.Is(err, shared.ErrUserNotFound):
 		writeError(w, http.StatusUnauthorized, "invalid_credentials", "invalid credentials")
 	case errors.Is(err, shared.ErrEmailAlreadyTaken):
 		writeError(w, http.StatusConflict, "email_taken", "email is already registered")
@@ -298,6 +331,10 @@ func writeBusinessError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusBadRequest, "challenge_expired", "challenge not found or expired")
 	case errors.Is(err, shared.ErrChallengeInvalid):
 		writeError(w, http.StatusBadRequest, "challenge_invalid", "invalid challenge response")
+	case errors.Is(err, shared.ErrCredentialAlreadyBound):
+		writeError(w, http.StatusConflict, "credential_already_bound", "credential is already bound to another user")
+	case errors.Is(err, shared.ErrCredentialAlreadyExists):
+		writeError(w, http.StatusConflict, "credential_already_exists", "credential is already bound to this user")
 	case errors.Is(err, shared.ErrInvalidToken), errors.Is(err, shared.ErrTokenExpired):
 		writeError(w, http.StatusUnauthorized, "invalid_token", "token is invalid or expired")
 	default:

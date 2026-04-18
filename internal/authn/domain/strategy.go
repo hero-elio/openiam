@@ -28,6 +28,13 @@ type AuthnStrategy interface {
 	Authenticate(ctx context.Context, req *AuthnRequest) (*AuthnResult, error)
 }
 
+// BindableStrategy can verify a cryptographic proof and return the verified subject
+// without performing credential lookup. Used for credential binding flows.
+type BindableStrategy interface {
+	AuthnStrategy
+	VerifyAndBind(ctx context.Context, req *AuthnRequest, userID shared.UserID) error
+}
+
 type ChallengeableStrategy interface {
 	AuthnStrategy
 	Challenge(ctx context.Context, req *ChallengeRequest) (*ChallengeResponse, error)
@@ -73,6 +80,35 @@ type RegisterRequest struct {
 
 type UserRegistrar interface {
 	Register(ctx context.Context, req *RegisterRequest) (userID string, err error)
+}
+
+// ExternalIdentityProvider creates a user from an external credential subject
+// (e.g. CAIP-10 address for SIWE, base64url credential ID for WebAuthn)
+// and returns the new user's identity. Called during first-time external login.
+type ExternalIdentityProvider interface {
+	EnsureExternalUser(ctx context.Context, req *EnsureExternalUserRequest) (*UserInfo, error)
+}
+
+type EnsureExternalUserRequest struct {
+	AppID             shared.AppID
+	TenantID          shared.TenantID
+	Provider          string
+	CredentialSubject string
+	PublicKey         string
+}
+
+// CredentialBinder creates a new credential for an already-authenticated user.
+type CredentialBinder interface {
+	BindCredential(ctx context.Context, req *BindCredentialRequest) error
+}
+
+type BindCredentialRequest struct {
+	UserID            shared.UserID
+	AppID             shared.AppID
+	CredentialType    CredentialType
+	Provider          string
+	CredentialSubject string
+	PublicKey         string
 }
 
 type UserInfo struct {
