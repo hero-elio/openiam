@@ -35,8 +35,9 @@ func (s *Subscriber) onUserRegistered(ctx context.Context, evt shared.DomainEven
 
 	userID := reg.UserID
 	tenantID := reg.TenantID
+	appID := reg.AppID
 
-	roles, err := s.roleRepo.ListByApp(ctx, shared.AppID("default"))
+	roles, err := s.roleRepo.ListByApp(ctx, appID)
 	if err != nil {
 		slog.Error("failed to list roles for default app", "error", err)
 		return err
@@ -57,13 +58,13 @@ func (s *Subscriber) onUserRegistered(ctx context.Context, evt shared.DomainEven
 
 	uar := &domain.UserAppRole{
 		UserID:     userID,
-		AppID:      shared.AppID("default"),
+		AppID:      appID,
 		RoleID:     memberRole.ID,
 		TenantID:   tenantID,
 		AssignedAt: time.Now(),
 	}
 
-	if err := s.roleRepo.SaveUserAppRole(ctx, uar); err != nil {
+	if err = s.roleRepo.SaveUserAppRole(ctx, uar); err != nil {
 		slog.Error("failed to auto-assign default role", "user_id", userID.String(), "error", err)
 		return err
 	}

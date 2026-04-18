@@ -11,3 +11,10 @@ func WithPasswordAuth(credRepo domain.CredentialRepository, userProvider domain.
 		return nil
 	}
 }
+
+func WithRegistrar(r domain.UserRegistrar) Option {
+	return func(svc *AuthnAppService) error {
+		svc.registrar = r
+		return nil
+	}
+}

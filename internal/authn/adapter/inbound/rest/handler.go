@@ -36,6 +36,7 @@ func NewHandler(svc *application.AuthnAppService, tokenProvider domain.TokenProv
 func (h *Handler) Routes() chi.Router {
 	r := chi.NewRouter()
 
+	r.Post("/register", h.handleRegister)
 	r.Post("/login", h.handleLogin)
 	r.Post("/token/refresh", h.handleRefreshToken)
 
@@ -66,6 +67,42 @@ func (h *Handler) AuthMiddleware(next http.Handler) http.Handler {
 		ctx = context.WithValue(ctx, ctxTenantID, claims.TenantID)
 		ctx = context.WithValue(ctx, ctxAppID, claims.AppID)
 		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+func (h *Handler) handleRegister(w http.ResponseWriter, r *http.Request) {
+	var req RegisterRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "invalid request body")
+		return
+	}
+
+	if req.AppID == "" {
+		writeError(w, http.StatusBadRequest, "invalid_argument", "app_id is required")
+		return
+	}
+	if req.Email == "" || req.Password == "" {
+		writeError(w, http.StatusBadRequest, "invalid_argument", "email and password are required")
+		return
+	}
+
+	tokenPair, err := h.svc.Register(r.Context(), &command.Register{
+		AppID:    req.AppID,
+		Provider: req.Provider,
+		Email:    req.Email,
+		Password: req.Password,
+		TenantID: req.TenantID,
+	})
+	if err != nil {
+		writeBusinessError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, TokenResponse{
+		AccessToken:  tokenPair.AccessToken,
+		RefreshToken: tokenPair.RefreshToken,
+		TokenType:    tokenPair.TokenType,
+		ExpiresIn:    tokenPair.ExpiresIn,
 	})
 }
 
@@ -214,6 +251,10 @@ func writeBusinessError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusUnauthorized, "invalid_credentials", "invalid email or password")
 	case errors.Is(err, shared.ErrUserNotFound), errors.Is(err, shared.ErrCredentialNotFound):
 		writeError(w, http.StatusUnauthorized, "invalid_credentials", "invalid email or password")
+	case errors.Is(err, shared.ErrEmailAlreadyTaken):
+		writeError(w, http.StatusConflict, "email_taken", "email is already registered")
+	case errors.Is(err, shared.ErrPasswordTooShort):
+		writeError(w, http.StatusBadRequest, "password_too_short", "password must be at least 8 characters")
 	case errors.Is(err, shared.ErrUserDisabled):
 		writeError(w, http.StatusForbidden, "user_disabled", "account is disabled")
 	case errors.Is(err, shared.ErrUserLocked):

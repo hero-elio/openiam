@@ -17,7 +17,6 @@ import (
 	authnPersistence "openiam/internal/authn/adapter/outbound/persistence"
 	authnToken "openiam/internal/authn/adapter/outbound/token"
 	authnApp "openiam/internal/authn/application"
-	authnDomain "openiam/internal/authn/domain"
 
 	authzEvent "openiam/internal/authz/adapter/inbound/event"
 	authzRest "openiam/internal/authz/adapter/inbound/rest"
@@ -28,7 +27,6 @@ import (
 	identityRest "openiam/internal/identity/adapter/inbound/rest"
 	identityPersistence "openiam/internal/identity/adapter/outbound/persistence"
 	identityApp "openiam/internal/identity/application"
-	identityQuery "openiam/internal/identity/application/query"
 
 	shared "openiam/internal/shared/domain"
 	"openiam/internal/shared/infra/eventbus"
@@ -97,7 +95,7 @@ func New(cfg Config, logger *slog.Logger) (*Engine, error) {
 		AccessTokenTTL: cfg.AccessTokenTTL,
 	})
 
-	userInfoBridge := &identityUserInfoAdapter{svc: identitySvc}
+	identityAdapter := &identityBridgeAdapter{svc: identitySvc}
 
 	sessionTTL := cfg.SessionTTL
 	if sessionTTL == 0 {
@@ -109,7 +107,8 @@ func New(cfg Config, logger *slog.Logger) (*Engine, error) {
 
 	authnSvc, err := authnApp.NewAuthnAppService(
 		sessionRepo, jwtProvider, bus, sessionTTL, logger,
-		authnApp.WithPasswordAuth(credRepo, userInfoBridge),
+		authnApp.WithPasswordAuth(credRepo, identityAdapter),
+		authnApp.WithRegistrar(identityAdapter),
 	)
 	if err != nil {
 		_ = db.Close()
@@ -132,7 +131,7 @@ func New(cfg Config, logger *slog.Logger) (*Engine, error) {
 	authzHandler := authzRest.NewHandler(authzSvc)
 
 	authzSub := authzEvent.NewSubscriber(roleRepo, bus)
-	if err := authzSub.Register(); err != nil {
+	if err = authzSub.Register(); err != nil {
 		_ = db.Close()
 		_ = rdb.Close()
 		return nil, fmt.Errorf("register authz event subscriber: %w", err)
@@ -174,21 +173,4 @@ func (e *Engine) Close() error {
 		return dbErr
 	}
 	return redisErr
-}
-
-// identityUserInfoAdapter bridges identity's IdentityService to authn's UserInfoProvider interface.
-type identityUserInfoAdapter struct {
-	svc *identityApp.IdentityService
-}
-
-func (a *identityUserInfoAdapter) GetUserInfo(ctx context.Context, userID shared.UserID) (*authnDomain.UserInfo, error) {
-	dto, err := a.svc.GetUser(ctx, &identityQuery.GetUser{UserID: userID.String()})
-	if err != nil {
-		return nil, err
-	}
-	return &authnDomain.UserInfo{
-		UserID:   userID,
-		TenantID: shared.TenantID(dto.TenantID),
-		Status:   dto.Status,
-	}, nil
 }

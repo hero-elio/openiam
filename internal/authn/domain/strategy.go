@@ -35,6 +35,19 @@ type UserInfoProvider interface {
 	GetUserInfo(ctx context.Context, userID shared.UserID) (*UserInfo, error)
 }
 
+type RegisterRequest struct {
+	AppID    string
+	Provider string
+	Email    string
+	Password string
+	TenantID string
+	Metadata map[string]string
+}
+
+type UserRegistrar interface {
+	Register(ctx context.Context, req *RegisterRequest) (userID string, err error)
+}
+
 type UserInfo struct {
 	UserID   shared.UserID
 	TenantID shared.TenantID

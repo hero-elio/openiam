@@ -7,6 +7,14 @@ type LoginRequest struct {
 	Password string `json:"password"`
 }
 
+type RegisterRequest struct {
+	AppID    string `json:"app_id"`
+	Provider string `json:"provider"`
+	Email    string `json:"email"`
+	Password string `json:"password"`
+	TenantID string `json:"tenant_id"`
+}
+
 type RefreshTokenRequest struct {
 	RefreshToken string `json:"refresh_token"`
 }

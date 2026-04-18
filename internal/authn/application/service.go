@@ -31,6 +31,7 @@ type AuthnAppService struct {
 	sessionRepo   domain.SessionRepository
 	tokenProvider domain.TokenProvider
 	eventBus      shared.EventBus
+	registrar     domain.UserRegistrar
 	sessionTTL    time.Duration
 	logger        *slog.Logger
 }
@@ -202,6 +203,37 @@ func (s *AuthnAppService) ListSessions(ctx context.Context, userID string) ([]*S
 		result[i] = toSessionDTO(sess)
 	}
 	return result, nil
+}
+
+func (s *AuthnAppService) Register(ctx context.Context, cmd *command.Register) (*domain.TokenPair, error) {
+	if s.registrar == nil {
+		return nil, fmt.Errorf("user registrar not configured")
+	}
+
+	provider := cmd.Provider
+	if provider == "" {
+		provider = "password"
+	}
+
+	_, err := s.registrar.Register(ctx, &domain.RegisterRequest{
+		AppID:    cmd.AppID,
+		Provider: provider,
+		Email:    cmd.Email,
+		Password: cmd.Password,
+		TenantID: cmd.TenantID,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return s.Login(ctx, &command.Login{
+		AppID:    cmd.AppID,
+		Provider: provider,
+		Params: map[string]string{
+			"email":    cmd.Email,
+			"password": cmd.Password,
+		},
+	})
 }
 
 func toSessionDTO(s *domain.Session) *SessionDTO {
