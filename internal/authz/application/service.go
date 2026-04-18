@@ -1,0 +1,224 @@
+package application
+
+import (
+	"context"
+	"time"
+
+	shared "openiam/internal/shared/domain"
+	"openiam/internal/shared/infra/persistence"
+
+	"openiam/internal/authz/application/command"
+	"openiam/internal/authz/application/query"
+	"openiam/internal/authz/domain"
+)
+
+type RoleDTO struct {
+	ID          string
+	AppID       string
+	TenantID    string
+	Name        string
+	Description string
+	Permissions []string
+	IsSystem    bool
+	CreatedAt   string
+}
+
+type UserAppRoleDTO struct {
+	UserID     string
+	AppID      string
+	RoleID     string
+	TenantID   string
+	AssignedAt string
+}
+
+type CheckPermissionResult struct {
+	Allowed bool
+}
+
+type AuthzAppService struct {
+	roleRepo  domain.RoleRepository
+	enforcer  *domain.Enforcer
+	eventBus  shared.EventBus
+	txManager *persistence.TxManager
+}
+
+func NewAuthzAppService(
+	roleRepo domain.RoleRepository,
+	enforcer *domain.Enforcer,
+	eventBus shared.EventBus,
+	txManager *persistence.TxManager,
+) *AuthzAppService {
+	return &AuthzAppService{
+		roleRepo:  roleRepo,
+		enforcer:  enforcer,
+		eventBus:  eventBus,
+		txManager: txManager,
+	}
+}
+
+func (s *AuthzAppService) CreateRole(ctx context.Context, cmd *command.CreateRole) (shared.RoleID, error) {
+	appID := shared.AppID(cmd.AppID)
+	tenantID := shared.TenantID(cmd.TenantID)
+
+	existing, err := s.roleRepo.FindByName(ctx, appID, cmd.Name)
+	if err != nil && err != shared.ErrRoleNotFound {
+		return "", err
+	}
+	if existing != nil {
+		return "", shared.ErrRoleAlreadyExists
+	}
+
+	role := domain.NewRole(appID, tenantID, cmd.Name, cmd.Description)
+
+	if err := s.txManager.Execute(ctx, func(txCtx context.Context) error {
+		if err := s.roleRepo.Save(txCtx, role); err != nil {
+			return err
+		}
+		return s.eventBus.Publish(txCtx, role.PullEvents()...)
+	}); err != nil {
+		return "", err
+	}
+
+	return role.ID, nil
+}
+
+func (s *AuthzAppService) AssignRole(ctx context.Context, cmd *command.AssignRole) error {
+	userID := shared.UserID(cmd.UserID)
+	appID := shared.AppID(cmd.AppID)
+	roleID := shared.RoleID(cmd.RoleID)
+	tenantID := shared.TenantID(cmd.TenantID)
+
+	if _, err := s.roleRepo.FindByID(ctx, roleID); err != nil {
+		return err
+	}
+
+	uar := &domain.UserAppRole{
+		UserID:     userID,
+		AppID:      appID,
+		RoleID:     roleID,
+		TenantID:   tenantID,
+		AssignedAt: time.Now(),
+	}
+
+	return s.txManager.Execute(ctx, func(txCtx context.Context) error {
+		if err := s.roleRepo.SaveUserAppRole(txCtx, uar); err != nil {
+			return err
+		}
+		return s.eventBus.Publish(txCtx, domain.RoleAssignedEvent{
+			UserID:    userID,
+			AppID:     appID,
+			RoleID:    roleID,
+			TenantID:  tenantID,
+			Timestamp: uar.AssignedAt,
+		})
+	})
+}
+
+func (s *AuthzAppService) GrantPermission(ctx context.Context, cmd *command.GrantPermission) error {
+	roleID := shared.RoleID(cmd.RoleID)
+
+	role, err := s.roleRepo.FindByID(ctx, roleID)
+	if err != nil {
+		return err
+	}
+
+	perm := domain.NewPermission(cmd.Resource, cmd.Action)
+	if err := role.GrantPermission(perm); err != nil {
+		return err
+	}
+
+	return s.txManager.Execute(ctx, func(txCtx context.Context) error {
+		if err := s.roleRepo.Save(txCtx, role); err != nil {
+			return err
+		}
+		return s.eventBus.Publish(txCtx, role.PullEvents()...)
+	})
+}
+
+func (s *AuthzAppService) RevokePermission(ctx context.Context, cmd *command.RevokePermission) error {
+	roleID := shared.RoleID(cmd.RoleID)
+
+	role, err := s.roleRepo.FindByID(ctx, roleID)
+	if err != nil {
+		return err
+	}
+
+	perm := domain.NewPermission(cmd.Resource, cmd.Action)
+	if err := role.RevokePermission(perm); err != nil {
+		return err
+	}
+
+	return s.roleRepo.Save(ctx, role)
+}
+
+func (s *AuthzAppService) UnassignRole(ctx context.Context, userID, appID, roleID string) error {
+	return s.roleRepo.DeleteUserAppRole(
+		ctx,
+		shared.UserID(userID),
+		shared.AppID(appID),
+		shared.RoleID(roleID),
+	)
+}
+
+func (s *AuthzAppService) CheckPermission(ctx context.Context, q *query.CheckPermission) (*CheckPermissionResult, error) {
+	allowed, err := s.enforcer.IsAllowed(
+		ctx,
+		shared.UserID(q.UserID),
+		shared.AppID(q.AppID),
+		q.Resource,
+		q.Action,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &CheckPermissionResult{Allowed: allowed}, nil
+}
+
+func (s *AuthzAppService) ListRoles(ctx context.Context, q *query.ListRoles) ([]*RoleDTO, error) {
+	roles, err := s.roleRepo.ListByApp(ctx, shared.AppID(q.AppID))
+	if err != nil {
+		return nil, err
+	}
+
+	dtos := make([]*RoleDTO, 0, len(roles))
+	for _, r := range roles {
+		dtos = append(dtos, toRoleDTO(r))
+	}
+	return dtos, nil
+}
+
+func (s *AuthzAppService) ListUserRoles(ctx context.Context, q *query.ListUserRoles) ([]*UserAppRoleDTO, error) {
+	uars, err := s.roleRepo.FindUserAppRoles(ctx, shared.UserID(q.UserID), shared.AppID(q.AppID))
+	if err != nil {
+		return nil, err
+	}
+
+	dtos := make([]*UserAppRoleDTO, 0, len(uars))
+	for _, uar := range uars {
+		dtos = append(dtos, &UserAppRoleDTO{
+			UserID:     uar.UserID.String(),
+			AppID:      uar.AppID.String(),
+			RoleID:     uar.RoleID.String(),
+			TenantID:   uar.TenantID.String(),
+			AssignedAt: uar.AssignedAt.Format(time.RFC3339),
+		})
+	}
+	return dtos, nil
+}
+
+func toRoleDTO(r *domain.Role) *RoleDTO {
+	perms := make([]string, 0, len(r.Permissions))
+	for _, p := range r.Permissions {
+		perms = append(perms, p.String())
+	}
+	return &RoleDTO{
+		ID:          r.ID.String(),
+		AppID:       r.AppID.String(),
+		TenantID:    r.TenantID.String(),
+		Name:        r.Name,
+		Description: r.Description,
+		Permissions: perms,
+		IsSystem:    r.IsSystem,
+		CreatedAt:   r.CreatedAt.Format(time.RFC3339),
+	}
+}

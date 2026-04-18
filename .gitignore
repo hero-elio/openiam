@@ -1,0 +1,48 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+iam-server
+
+# Test binary
+*.test
+
+# Output
+*.out
+*.prof
+
+# Go workspace
+go.work
+go.work.sum
+
+# Dependency directory
+vendor/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment / secrets
+.env
+.env.*
+config/config.yaml
+config/config.local.yaml
+
+# Docker data
+deploy/docker/data/
+
+# Build output
+dist/
+bin/
+
+# AI design docs
+docs/ai/

@@ -1,0 +1,53 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: iam
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  iam-server:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      IAM_DATABASE_DSN: "postgres://postgres:postgres@postgres:5432/iam?sslmode=disable"
+      IAM_REDIS_ADDR: "redis:6379"
+      IAM_JWT_SECRET: "change-me-in-production"
+      IAM_JWT_ISSUER: "iam-server"
+      IAM_JWT_ACCESS_TTL: "15m"
+      IAM_JWT_REFRESH_TTL: "168h"
+      IAM_SESSION_TTL: "168h"
+      IAM_SERVER_ADDR: ":8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  redisdata:
