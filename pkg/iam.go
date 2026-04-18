@@ -45,9 +45,16 @@ type Config struct {
 	RefreshTokenTTL time.Duration
 	SessionTTL      time.Duration
 
-	SIWEDomain        string
-	WebAuthnRPID      string
-	WebAuthnRPName    string
+	// SIWEDomain is the domain validated against the SIWE message (e.g. "example.com").
+	// Leave empty to disable the SIWE strategy.
+	SIWEDomain string
+
+	// WebAuthn / Passkey configuration. Enabled when both RPID and RPOrigins are set.
+	// WebAuthnRPID is the Relying Party identifier, typically the domain without scheme or port (e.g. "example.com").
+	WebAuthnRPID string
+	// WebAuthnRPName is the human-readable site name shown to the user (e.g. "Example Inc.").
+	WebAuthnRPName string
+	// WebAuthnRPOrigins is the list of permitted origins (e.g. ["https://example.com"]).
 	WebAuthnRPOrigins []string
 }
 
