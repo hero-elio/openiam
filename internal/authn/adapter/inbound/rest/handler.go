@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -38,6 +39,7 @@ func (h *Handler) Routes() chi.Router {
 
 	r.Post("/register", h.handleRegister)
 	r.Post("/login", h.handleLogin)
+	r.Post("/challenge", h.handleChallenge)
 	r.Post("/token/refresh", h.handleRefreshToken)
 
 	r.Group(func(r chi.Router) {
@@ -123,15 +125,10 @@ func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
 		provider = "password"
 	}
 
-	params := map[string]string{
-		"email":    req.Email,
-		"password": req.Password,
-	}
-
 	tokenPair, err := h.svc.Login(r.Context(), &command.Login{
 		AppID:     req.AppID,
 		Provider:  provider,
-		Params:    params,
+		Params:    req.Params,
 		UserAgent: r.UserAgent(),
 		IPAddress: realIP(r),
 	})
@@ -145,6 +142,36 @@ func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
 		RefreshToken: tokenPair.RefreshToken,
 		TokenType:    tokenPair.TokenType,
 		ExpiresIn:    tokenPair.ExpiresIn,
+	})
+}
+
+func (h *Handler) handleChallenge(w http.ResponseWriter, r *http.Request) {
+	var req ChallengeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "invalid request body")
+		return
+	}
+
+	if req.AppID == "" || req.Provider == "" {
+		writeError(w, http.StatusBadRequest, "invalid_argument", "app_id and provider are required")
+		return
+	}
+
+	resp, err := h.svc.BeginChallenge(r.Context(), &command.Challenge{
+		AppID:    req.AppID,
+		Provider: req.Provider,
+		Params:   req.Params,
+	})
+	if err != nil {
+		writeBusinessError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, ChallengeResponse{
+		ChallengeID: resp.ChallengeID,
+		Provider:    resp.Provider,
+		Data:        resp.Data,
+		ExpiresAt:   resp.ExpiresAt.Format(time.RFC3339),
 	})
 }
 
@@ -248,9 +275,9 @@ func writeError(w http.ResponseWriter, status int, code, message string) {
 func writeBusinessError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, shared.ErrInvalidCredential), errors.Is(err, shared.ErrInvalidPassword):
-		writeError(w, http.StatusUnauthorized, "invalid_credentials", "invalid email or password")
+		writeError(w, http.StatusUnauthorized, "invalid_credentials", "invalid credentials")
 	case errors.Is(err, shared.ErrUserNotFound), errors.Is(err, shared.ErrCredentialNotFound):
-		writeError(w, http.StatusUnauthorized, "invalid_credentials", "invalid email or password")
+		writeError(w, http.StatusUnauthorized, "invalid_credentials", "invalid credentials")
 	case errors.Is(err, shared.ErrEmailAlreadyTaken):
 		writeError(w, http.StatusConflict, "email_taken", "email is already registered")
 	case errors.Is(err, shared.ErrPasswordTooShort):
@@ -265,6 +292,12 @@ func writeBusinessError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusUnauthorized, "session_expired", "session has expired")
 	case errors.Is(err, shared.ErrUnsupportedProvider):
 		writeError(w, http.StatusBadRequest, "unsupported_provider", "unsupported authentication provider")
+	case errors.Is(err, shared.ErrChallengeNotSupported):
+		writeError(w, http.StatusBadRequest, "challenge_not_supported", "this provider does not support challenge flow")
+	case errors.Is(err, shared.ErrChallengeNotFound):
+		writeError(w, http.StatusBadRequest, "challenge_expired", "challenge not found or expired")
+	case errors.Is(err, shared.ErrChallengeInvalid):
+		writeError(w, http.StatusBadRequest, "challenge_invalid", "invalid challenge response")
 	case errors.Is(err, shared.ErrInvalidToken), errors.Is(err, shared.ErrTokenExpired):
 		writeError(w, http.StatusUnauthorized, "invalid_token", "token is invalid or expired")
 	default:

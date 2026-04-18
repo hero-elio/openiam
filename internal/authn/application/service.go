@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"time"
@@ -127,6 +128,23 @@ func (s *AuthnAppService) Login(ctx context.Context, cmd *command.Login) (*domai
 	return tokenPair, nil
 }
 
+func (s *AuthnAppService) BeginChallenge(ctx context.Context, cmd *command.Challenge) (*domain.ChallengeResponse, error) {
+	strategy, ok := s.strategies[domain.CredentialType(cmd.Provider)]
+	if !ok {
+		return nil, shared.ErrUnsupportedProvider
+	}
+
+	challengeable, ok := strategy.(domain.ChallengeableStrategy)
+	if !ok {
+		return nil, shared.ErrChallengeNotSupported
+	}
+
+	return challengeable.Challenge(ctx, &domain.ChallengeRequest{
+		AppID:  shared.AppID(cmd.AppID),
+		Params: cmd.Params,
+	})
+}
+
 func (s *AuthnAppService) Logout(ctx context.Context, cmd *command.Logout) error {
 	sessionID := shared.SessionID(cmd.SessionID)
 	userID := shared.UserID(cmd.UserID)
@@ -226,13 +244,15 @@ func (s *AuthnAppService) Register(ctx context.Context, cmd *command.Register) (
 		return nil, err
 	}
 
+	params, _ := json.Marshal(map[string]string{
+		"email":    cmd.Email,
+		"password": cmd.Password,
+	})
+
 	return s.Login(ctx, &command.Login{
 		AppID:    cmd.AppID,
 		Provider: provider,
-		Params: map[string]string{
-			"email":    cmd.Email,
-			"password": cmd.Password,
-		},
+		Params:   params,
 	})
 }
 

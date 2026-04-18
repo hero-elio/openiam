@@ -24,17 +24,18 @@ func (s *Subscriber) Register(eventBus shared.EventBus) error {
 	return eventBus.Subscribe("user.registered", s.onUserRegistered)
 }
 
-func (s *Subscriber) onUserRegistered(ctx context.Context, evt shared.DomainEvent) error {
-	type registeredPayload interface {
-		shared.DomainEvent
-		GetUserID() shared.UserID
-		GetAppID() shared.AppID
-		GetProvider() string
-		GetEmail() string
-		GetPasswordHash() string
-		GetTenantID() shared.TenantID
-	}
+type registeredPayload interface {
+	shared.DomainEvent
+	GetUserID() shared.UserID
+	GetAppID() shared.AppID
+	GetProvider() string
+	GetCredentialSubject() string
+	GetSecret() string
+	GetPublicKey() string
+	GetTenantID() shared.TenantID
+}
 
+func (s *Subscriber) onUserRegistered(ctx context.Context, evt shared.DomainEvent) error {
 	payload, ok := evt.(registeredPayload)
 	if !ok {
 		s.logger.WarnContext(ctx, "user.registered event payload type not recognized",
@@ -50,11 +51,15 @@ func (s *Subscriber) onUserRegistered(ctx context.Context, evt shared.DomainEven
 		payload.GetAppID(),
 		credType,
 		payload.GetProvider(),
-		payload.GetEmail(),
+		payload.GetCredentialSubject(),
 	)
 
-	if hash := payload.GetPasswordHash(); hash != "" {
-		cred.SetSecret(hash)
+	if secret := payload.GetSecret(); secret != "" {
+		cred.SetSecret(secret)
+	}
+
+	if pubKey := payload.GetPublicKey(); pubKey != "" {
+		cred.SetPublicKey(pubKey)
 	}
 
 	if err := s.credRepo.Save(ctx, cred); err != nil {

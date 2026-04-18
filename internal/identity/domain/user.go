@@ -43,13 +43,13 @@ func NewUser(email Email, rawPassword string, tenantID shared.TenantID, appID sh
 		UpdatedAt: now,
 	}
 	u.RecordEvent(UserRegisteredEvent{
-		UserID:       u.ID,
-		AppID:        appID,
-		Provider:     provider,
-		Email:        email.String(),
-		PasswordHash: password.Hash(),
-		TenantID:     tenantID,
-		Timestamp:    now,
+		UserID:            u.ID,
+		AppID:             appID,
+		Provider:          provider,
+		CredentialSubject: email.String(),
+		Secret:            password.Hash(),
+		TenantID:          tenantID,
+		Timestamp:         now,
 	})
 	return u, nil
 }

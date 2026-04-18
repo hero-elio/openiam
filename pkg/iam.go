@@ -15,6 +15,7 @@ import (
 	authnEvent "openiam/internal/authn/adapter/inbound/event"
 	authnRest "openiam/internal/authn/adapter/inbound/rest"
 	authnPersistence "openiam/internal/authn/adapter/outbound/persistence"
+	authnStrategy "openiam/internal/authn/adapter/outbound/strategy"
 	authnToken "openiam/internal/authn/adapter/outbound/token"
 	authnApp "openiam/internal/authn/application"
 
@@ -43,6 +44,11 @@ type Config struct {
 	AccessTokenTTL  time.Duration
 	RefreshTokenTTL time.Duration
 	SessionTTL      time.Duration
+
+	SIWEDomain        string
+	WebAuthnRPID      string
+	WebAuthnRPName    string
+	WebAuthnRPOrigins []string
 }
 
 type Engine struct {
@@ -88,6 +94,7 @@ func New(cfg Config, logger *slog.Logger) (*Engine, error) {
 	// --- Authn ---
 	credRepo := authnPersistence.NewPostgresCredentialRepo(db)
 	sessionRepo := authnPersistence.NewRedisSessionRepo(rdb)
+	challengeStore := authnPersistence.NewRedisChallengeStore(rdb)
 
 	jwtProvider := authnToken.NewJWTProvider(authnToken.JWTConfig{
 		Secret:         cfg.JWTSecret,
@@ -105,10 +112,32 @@ func New(cfg Config, logger *slog.Logger) (*Engine, error) {
 		sessionTTL = 7 * 24 * time.Hour
 	}
 
-	authnSvc, err := authnApp.NewAuthnAppService(
-		sessionRepo, jwtProvider, bus, sessionTTL, logger,
+	authnOpts := []authnApp.Option{
 		authnApp.WithPasswordAuth(credRepo, identityAdapter),
 		authnApp.WithRegistrar(identityAdapter),
+	}
+
+	if cfg.SIWEDomain != "" {
+		authnOpts = append(authnOpts, authnApp.WithSIWEAuth(
+			authnStrategy.SIWEConfig{Domain: cfg.SIWEDomain},
+			credRepo, identityAdapter, challengeStore,
+		))
+	}
+
+	if cfg.WebAuthnRPID != "" && len(cfg.WebAuthnRPOrigins) > 0 {
+		authnOpts = append(authnOpts, authnApp.WithWebAuthnAuth(
+			authnStrategy.WebAuthnConfig{
+				RPID:          cfg.WebAuthnRPID,
+				RPDisplayName: cfg.WebAuthnRPName,
+				RPOrigins:     cfg.WebAuthnRPOrigins,
+			},
+			credRepo, identityAdapter, challengeStore,
+		))
+	}
+
+	authnSvc, err := authnApp.NewAuthnAppService(
+		sessionRepo, jwtProvider, bus, sessionTTL, logger,
+		authnOpts...,
 	)
 	if err != nil {
 		_ = db.Close()

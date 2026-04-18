@@ -1,10 +1,11 @@
 package rest
 
+import "encoding/json"
+
 type LoginRequest struct {
-	AppID    string `json:"app_id"`
-	Provider string `json:"provider"`
-	Email    string `json:"email"`
-	Password string `json:"password"`
+	AppID    string          `json:"app_id"`
+	Provider string          `json:"provider"`
+	Params   json.RawMessage `json:"params"`
 }
 
 type RegisterRequest struct {
@@ -13,6 +14,19 @@ type RegisterRequest struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
 	TenantID string `json:"tenant_id"`
+}
+
+type ChallengeRequest struct {
+	AppID    string          `json:"app_id"`
+	Provider string          `json:"provider"`
+	Params   json.RawMessage `json:"params,omitempty"`
+}
+
+type ChallengeResponse struct {
+	ChallengeID string         `json:"challenge_id"`
+	Provider    string         `json:"provider"`
+	Data        map[string]any `json:"data"`
+	ExpiresAt   string         `json:"expires_at"`
 }
 
 type RefreshTokenRequest struct {
