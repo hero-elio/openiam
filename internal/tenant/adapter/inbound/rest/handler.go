@@ -3,10 +3,12 @@ package rest
 import (
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
 
+	sharedAuth "openiam/internal/shared/auth"
 	"openiam/internal/tenant/application"
 	"openiam/internal/tenant/application/command"
 	"openiam/internal/tenant/application/query"
@@ -77,6 +79,12 @@ func (h *Handler) handleGetTenant(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) handleCreateApplication(w http.ResponseWriter, r *http.Request) {
 	tid := chi.URLParam(r, "tid")
 
+	claims, ok := sharedAuth.ClaimsFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "missing authentication")
+		return
+	}
+
 	var req CreateApplicationRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "invalid request body")
@@ -88,8 +96,9 @@ func (h *Handler) handleCreateApplication(w http.ResponseWriter, r *http.Request
 	}
 
 	result, err := h.svc.CreateApplication(r.Context(), &command.CreateApplication{
-		TenantID: tid,
-		Name:     req.Name,
+		TenantID:  tid,
+		Name:      req.Name,
+		CreatedBy: claims.UserID,
 	})
 	if err != nil {
 		writeBusinessError(w, err)
@@ -195,12 +204,13 @@ func writeError(w http.ResponseWriter, status int, code, message string) {
 func writeBusinessError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, domain.ErrTenantNotFound):
-		writeError(w, http.StatusNotFound, "tenant_not_found", err.Error())
+		writeError(w, http.StatusNotFound, "tenant_not_found", "tenant not found")
 	case errors.Is(err, domain.ErrAppNotFound):
-		writeError(w, http.StatusNotFound, "application_not_found", err.Error())
+		writeError(w, http.StatusNotFound, "application_not_found", "application not found")
 	case errors.Is(err, domain.ErrClientIDTaken):
-		writeError(w, http.StatusConflict, "client_id_taken", err.Error())
+		writeError(w, http.StatusConflict, "client_id_taken", "client id already taken")
 	default:
-		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		log.Printf("tenant handler: unhandled error: %v", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "internal server error")
 	}
 }

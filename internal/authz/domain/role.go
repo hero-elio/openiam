@@ -69,6 +69,12 @@ func (r *Role) RevokePermission(p Permission) error {
 	for i, existing := range r.Permissions {
 		if existing.Resource == p.Resource && existing.Action == p.Action {
 			r.Permissions = append(r.Permissions[:i], r.Permissions[i+1:]...)
+			r.RecordEvent(PermissionRevokedEvent{
+				RoleID:    r.ID,
+				Resource:  p.Resource,
+				Action:    p.Action,
+				Timestamp: time.Now(),
+			})
 			return nil
 		}
 	}

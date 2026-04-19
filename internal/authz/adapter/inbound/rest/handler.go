@@ -3,6 +3,7 @@ package rest
 import (
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -269,7 +270,11 @@ func (h *Handler) handleCheckPermission(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h *Handler) handleGrantResourcePermission(w http.ResponseWriter, r *http.Request) {
-	claims, _ := sharedAuth.ClaimsFromContext(r.Context())
+	claims, ok := sharedAuth.ClaimsFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "missing authentication")
+		return
+	}
 
 	var req GrantResourcePermissionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -476,14 +481,17 @@ func writeError(w http.ResponseWriter, status int, code, message string) {
 func writeBusinessError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, authzDomain.ErrRoleNotFound):
-		writeError(w, http.StatusNotFound, "role_not_found", err.Error())
+		writeError(w, http.StatusNotFound, "role_not_found", "role not found")
 	case errors.Is(err, authzDomain.ErrRoleAlreadyExists):
-		writeError(w, http.StatusConflict, "role_already_exists", err.Error())
+		writeError(w, http.StatusConflict, "role_already_exists", "role already exists")
 	case errors.Is(err, authzDomain.ErrPermissionAlreadyGranted):
-		writeError(w, http.StatusConflict, "permission_already_granted", err.Error())
+		writeError(w, http.StatusConflict, "permission_already_granted", "permission already granted")
+	case errors.Is(err, authzDomain.ErrSystemRoleProtected):
+		writeError(w, http.StatusForbidden, "system_role_protected", "system role cannot be modified")
 	case errors.Is(err, shared.ErrNotFound):
-		writeError(w, http.StatusNotFound, "not_found", err.Error())
+		writeError(w, http.StatusNotFound, "not_found", "resource not found")
 	default:
-		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		log.Printf("authz handler: unhandled error: %v", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "internal server error")
 	}
 }

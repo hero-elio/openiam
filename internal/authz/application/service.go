@@ -88,17 +88,16 @@ func (s *AuthzAppService) CreateRole(ctx context.Context, cmd *command.CreateRol
 	appID := shared.AppID(cmd.AppID)
 	tenantID := shared.TenantID(cmd.TenantID)
 
-	existing, err := s.roleRepo.FindByName(ctx, appID, cmd.Name)
-	if err != nil && err != domain.ErrRoleNotFound {
-		return "", err
-	}
-	if existing != nil {
-		return "", domain.ErrRoleAlreadyExists
-	}
-
 	role := domain.NewRole(appID, tenantID, cmd.Name, cmd.Description)
 
 	if err := s.txManager.Execute(ctx, func(txCtx context.Context) error {
+		existing, err := s.roleRepo.FindByName(txCtx, appID, cmd.Name)
+		if err != nil && err != domain.ErrRoleNotFound {
+			return err
+		}
+		if existing != nil {
+			return domain.ErrRoleAlreadyExists
+		}
 		if err := s.roleRepo.Save(txCtx, role); err != nil {
 			return err
 		}
@@ -117,7 +116,7 @@ func (s *AuthzAppService) DeleteRole(ctx context.Context, roleID string) error {
 		return err
 	}
 	if role.IsSystem {
-		return domain.ErrRoleNotFound
+		return domain.ErrSystemRoleProtected
 	}
 	return s.txManager.Execute(ctx, func(txCtx context.Context) error {
 		return s.roleRepo.Delete(txCtx, id)
@@ -194,22 +193,26 @@ func (s *AuthzAppService) RevokePermission(ctx context.Context, cmd *command.Rev
 		if err := s.roleRepo.Save(txCtx, role); err != nil {
 			return err
 		}
-		return s.eventBus.Publish(txCtx, domain.PermissionRevokedEvent{
-			RoleID:    roleID,
-			Resource:  cmd.Resource,
-			Action:    cmd.Action,
-			Timestamp: time.Now(),
-		})
+		return s.eventBus.Publish(txCtx, role.PullEvents()...)
 	})
 }
 
 func (s *AuthzAppService) UnassignRole(ctx context.Context, userID, appID, roleID string) error {
-	return s.roleRepo.DeleteUserAppRole(
-		ctx,
-		shared.UserID(userID),
-		shared.AppID(appID),
-		shared.RoleID(roleID),
-	)
+	uid := shared.UserID(userID)
+	aid := shared.AppID(appID)
+	rid := shared.RoleID(roleID)
+
+	return s.txManager.Execute(ctx, func(txCtx context.Context) error {
+		if err := s.roleRepo.DeleteUserAppRole(txCtx, uid, aid, rid); err != nil {
+			return err
+		}
+		return s.eventBus.Publish(txCtx, domain.RoleUnassignedEvent{
+			UserID:    uid,
+			AppID:     aid,
+			RoleID:    rid,
+			Timestamp: time.Now(),
+		})
+	})
 }
 
 func (s *AuthzAppService) CheckPermission(ctx context.Context, q *query.CheckPermission) (*CheckPermissionResult, error) {

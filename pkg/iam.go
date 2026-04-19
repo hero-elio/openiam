@@ -175,7 +175,7 @@ func New(cfg Config, logger *slog.Logger) (*Engine, error) {
 	authzSvc := authzApp.NewAuthzAppService(roleRepo, resPermRepo, permDefRepo, enforcer, bus, txMgr)
 	authzHandler := authzRest.NewHandler(authzSvc)
 
-	authzSub := authzEvent.NewSubscriber(roleRepo, permDefRepo, bus)
+	authzSub := authzEvent.NewSubscriber(roleRepo, permDefRepo, bus, txMgr)
 	if err = authzSub.Register(); err != nil {
 		_ = db.Close()
 		_ = rdb.Close()
@@ -184,7 +184,8 @@ func New(cfg Config, logger *slog.Logger) (*Engine, error) {
 
 	// --- Tenant ---
 	tenantRepo := tenantPersistence.NewPostgresTenantRepository(db)
-	tenantSvc := tenantApp.NewTenantAppService(tenantRepo, bus, txMgr)
+	appRepo := tenantPersistence.NewPostgresApplicationRepository(db)
+	tenantSvc := tenantApp.NewTenantAppService(tenantRepo, appRepo, bus, txMgr)
 	tenantHandler := tenantRest.NewHandler(tenantSvc)
 
 	// --- Router ---

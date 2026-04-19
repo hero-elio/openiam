@@ -35,20 +35,23 @@ type CreateApplicationResult struct {
 }
 
 type TenantAppService struct {
-	repo      domain.TenantRepository
-	eventBus  shared.EventBus
-	txManager *persistence.TxManager
+	tenantRepo domain.TenantRepository
+	appRepo    domain.ApplicationRepository
+	eventBus   shared.EventBus
+	txManager  *persistence.TxManager
 }
 
 func NewTenantAppService(
-	repo domain.TenantRepository,
+	tenantRepo domain.TenantRepository,
+	appRepo domain.ApplicationRepository,
 	eventBus shared.EventBus,
 	txManager *persistence.TxManager,
 ) *TenantAppService {
 	return &TenantAppService{
-		repo:      repo,
-		eventBus:  eventBus,
-		txManager: txManager,
+		tenantRepo: tenantRepo,
+		appRepo:    appRepo,
+		eventBus:   eventBus,
+		txManager:  txManager,
 	}
 }
 
@@ -56,7 +59,7 @@ func (s *TenantAppService) CreateTenant(ctx context.Context, cmd *command.Create
 	tenant := domain.NewTenant(cmd.Name)
 
 	if err := s.txManager.Execute(ctx, func(txCtx context.Context) error {
-		if err := s.repo.SaveTenant(txCtx, tenant); err != nil {
+		if err := s.tenantRepo.Save(txCtx, tenant); err != nil {
 			return err
 		}
 		return s.eventBus.Publish(txCtx, tenant.PullEvents()...)
@@ -68,7 +71,7 @@ func (s *TenantAppService) CreateTenant(ctx context.Context, cmd *command.Create
 }
 
 func (s *TenantAppService) GetTenant(ctx context.Context, q *query.GetTenant) (*TenantDTO, error) {
-	t, err := s.repo.FindTenantByID(ctx, shared.TenantID(q.TenantID))
+	t, err := s.tenantRepo.FindByID(ctx, shared.TenantID(q.TenantID))
 	if err != nil {
 		return nil, err
 	}
@@ -77,17 +80,15 @@ func (s *TenantAppService) GetTenant(ctx context.Context, q *query.GetTenant) (*
 
 func (s *TenantAppService) CreateApplication(ctx context.Context, cmd *command.CreateApplication) (*CreateApplicationResult, error) {
 	tenantID := shared.TenantID(cmd.TenantID)
-
-	if _, err := s.repo.FindTenantByID(ctx, tenantID); err != nil {
-		return nil, err
-	}
-
 	creds := domain.GenerateClientCredentials()
 	createdBy := shared.UserID(cmd.CreatedBy)
 	app := domain.NewApplication(tenantID, cmd.Name, creds, createdBy)
 
 	if err := s.txManager.Execute(ctx, func(txCtx context.Context) error {
-		if err := s.repo.SaveApplication(txCtx, app); err != nil {
+		if _, err := s.tenantRepo.FindByID(txCtx, tenantID); err != nil {
+			return err
+		}
+		if err := s.appRepo.Save(txCtx, app); err != nil {
 			return err
 		}
 		return s.eventBus.Publish(txCtx, app.PullEvents()...)
@@ -102,7 +103,7 @@ func (s *TenantAppService) CreateApplication(ctx context.Context, cmd *command.C
 }
 
 func (s *TenantAppService) GetApplication(ctx context.Context, q *query.GetApplication) (*ApplicationDTO, error) {
-	app, err := s.repo.FindApplicationByID(ctx, shared.AppID(q.AppID))
+	app, err := s.appRepo.FindByID(ctx, shared.AppID(q.AppID))
 	if err != nil {
 		return nil, err
 	}
@@ -110,7 +111,7 @@ func (s *TenantAppService) GetApplication(ctx context.Context, q *query.GetAppli
 }
 
 func (s *TenantAppService) ListApplications(ctx context.Context, q *query.ListApplications) ([]*ApplicationDTO, error) {
-	apps, err := s.repo.ListApplicationsByTenant(ctx, shared.TenantID(q.TenantID))
+	apps, err := s.appRepo.ListByTenant(ctx, shared.TenantID(q.TenantID))
 	if err != nil {
 		return nil, err
 	}
@@ -123,22 +124,24 @@ func (s *TenantAppService) ListApplications(ctx context.Context, q *query.ListAp
 }
 
 func (s *TenantAppService) UpdateApplication(ctx context.Context, cmd *command.UpdateApplication) error {
-	app, err := s.repo.FindApplicationByID(ctx, shared.AppID(cmd.AppID))
-	if err != nil {
-		return err
-	}
+	return s.txManager.Execute(ctx, func(txCtx context.Context) error {
+		app, err := s.appRepo.FindByID(txCtx, shared.AppID(cmd.AppID))
+		if err != nil {
+			return err
+		}
 
-	if cmd.Name != "" {
-		app.Name = cmd.Name
-	}
-	if cmd.RedirectURIs != nil {
-		app.RedirectURIs = cmd.RedirectURIs
-	}
-	if cmd.Scopes != nil {
-		app.Scopes = cmd.Scopes
-	}
+		if cmd.Name != "" {
+			app.Name = cmd.Name
+		}
+		if cmd.RedirectURIs != nil {
+			app.RedirectURIs = cmd.RedirectURIs
+		}
+		if cmd.Scopes != nil {
+			app.Scopes = cmd.Scopes
+		}
 
-	return s.repo.SaveApplication(ctx, app)
+		return s.appRepo.Save(txCtx, app)
+	})
 }
 
 func toTenantDTO(t *domain.Tenant) *TenantDTO {

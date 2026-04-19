@@ -11,6 +11,7 @@ const (
 	EventPermissionGranted         = "role.permission_granted"
 	EventPermissionRevoked         = "role.permission_revoked"
 	EventRoleAssigned              = "role.assigned"
+	EventRoleUnassigned            = "role.unassigned"
 	EventResourcePermissionGranted = "resource_permission.granted"
 	EventResourcePermissionRevoked = "resource_permission.revoked"
 )
@@ -49,6 +50,17 @@ type RoleAssignedEvent struct {
 func (e RoleAssignedEvent) EventName() string     { return EventRoleAssigned }
 func (e RoleAssignedEvent) OccurredAt() time.Time { return e.Timestamp }
 func (e RoleAssignedEvent) AggregateID() string   { return e.RoleID.String() }
+
+type RoleUnassignedEvent struct {
+	UserID    shared.UserID
+	AppID     shared.AppID
+	RoleID    shared.RoleID
+	Timestamp time.Time
+}
+
+func (e RoleUnassignedEvent) EventName() string     { return EventRoleUnassigned }
+func (e RoleUnassignedEvent) OccurredAt() time.Time { return e.Timestamp }
+func (e RoleUnassignedEvent) AggregateID() string   { return e.RoleID.String() }
 
 type PermissionRevokedEvent struct {
 	RoleID    shared.RoleID
