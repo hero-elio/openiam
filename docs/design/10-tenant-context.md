@@ -66,6 +66,12 @@ classDiagram
 - `ListApplications`
 - `UpdateApplication`
 
+输入约束（新增）：
+
+- `CreateTenant`：`name` 去空白后不能为空，否则返回 `ErrInvalidInput`
+- `CreateApplication`：`tenant_id` 不能为空，`name` 去空白后不能为空
+- `UpdateApplication`：`app_id` 不能为空；若 `name` 字段出现，则不能是仅空白
+
 事务边界：
 
 - `CreateTenant`、`CreateApplication`、`UpdateApplication` 在 `TxManager.Execute` 中执行业务写入。
@@ -84,11 +90,12 @@ sequenceDiagram
   participant Bus as EventBus
 
   API->>App: CreateApplication(cmd)
+  App->>App: 校验 tenant_id/name
   App->>App: 生成 ClientCredentials
   App->>TRepo: FindByID(tenantID)
   TRepo-->>App: Tenant
   App->>ARepo: Save(Application)
-  App->>Bus: Publish(application.created)
+  App->>Bus: Publish(application.created) (in transaction)
   App-->>API: ApplicationDTO + ClientSecret
 ```
 
@@ -96,19 +103,20 @@ sequenceDiagram
 
 ```mermaid
 flowchart TD
-  A[加载 Application] --> B{Name 非空?}
-  B -- 是 --> C[更新 Name]
-  B -- 否 --> D[跳过]
-  C --> E{RedirectURIs != nil?}
-  D --> E
-  E -- 是 --> F[更新 RedirectURIs]
-  E -- 否 --> G[跳过]
-  F --> H{Scopes != nil?}
-  G --> H
-  H -- 是 --> I[更新 Scopes]
-  H -- 否 --> J[跳过]
-  I --> K[Save]
-  J --> K
+  A[校验 app_id/name 输入] --> B[加载 Application]
+  B --> C{Name 非空?}
+  C -- 是 --> D[更新 Name]
+  C -- 否 --> E[跳过]
+  D --> F{RedirectURIs != nil?}
+  E --> F
+  F -- 是 --> G[更新 RedirectURIs]
+  F -- 否 --> H[跳过]
+  G --> I{Scopes != nil?}
+  H --> I
+  I -- 是 --> J[更新 Scopes]
+  I -- 否 --> K[跳过]
+  J --> L[Save]
+  K --> L
 ```
 
 ## 6. 发布事件

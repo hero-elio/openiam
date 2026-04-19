@@ -107,7 +107,7 @@ func TestTenantAppService_CreateTenant(t *testing.T) {
 	tenantRepo := &fakeTenantRepo{}
 	svc := NewTenantAppService(tenantRepo, &fakeAppRepo{}, &fakeEventBus{}, &fakeTxManager{})
 
-	tenantID, err := svc.CreateTenant(context.Background(), &command.CreateTenant{Name: "acme"})
+	tenantID, err := svc.CreateTenant(context.Background(), &command.CreateTenant{Name: "  acme  "})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestTenantAppService_CreateTenant(t *testing.T) {
 		t.Fatal("tenant id should not be empty")
 	}
 	if tenantRepo.saved == nil || tenantRepo.saved.Name != "acme" {
-		t.Fatalf("tenant should be saved with expected name")
+		t.Fatalf("tenant name should be trimmed and saved")
 	}
 }
 
@@ -224,6 +224,14 @@ func TestTenantAppService_GetAndListApplications(t *testing.T) {
 }
 
 func TestTenantAppService_ExceptionBoundaries(t *testing.T) {
+	t.Run("create tenant invalid input", func(t *testing.T) {
+		svc := NewTenantAppService(&fakeTenantRepo{}, &fakeAppRepo{}, &fakeEventBus{}, &fakeTxManager{})
+		_, err := svc.CreateTenant(context.Background(), &command.CreateTenant{Name: "   "})
+		if !errors.Is(err, shared.ErrInvalidInput) {
+			t.Fatalf("expected invalid input, got %v", err)
+		}
+	})
+
 	t.Run("create tenant tx failure", func(t *testing.T) {
 		txErr := errors.New("tx failed")
 		svc := NewTenantAppService(&fakeTenantRepo{}, &fakeAppRepo{}, &fakeEventBus{}, &fakeTxManager{executeErr: txErr})
@@ -241,6 +249,25 @@ func TestTenantAppService_ExceptionBoundaries(t *testing.T) {
 		})
 		if !errors.Is(err, shared.ErrNotFound) {
 			t.Fatalf("expected tenant lookup error, got %v", err)
+		}
+	})
+
+	t.Run("create application invalid input", func(t *testing.T) {
+		svc := NewTenantAppService(&fakeTenantRepo{}, &fakeAppRepo{}, &fakeEventBus{}, &fakeTxManager{})
+		_, err := svc.CreateApplication(context.Background(), &command.CreateApplication{
+			TenantID: "",
+			Name:     "portal",
+		})
+		if !errors.Is(err, shared.ErrInvalidInput) {
+			t.Fatalf("expected invalid input, got %v", err)
+		}
+
+		_, err = svc.CreateApplication(context.Background(), &command.CreateApplication{
+			TenantID: shared.NewTenantID().String(),
+			Name:     "   ",
+		})
+		if !errors.Is(err, shared.ErrInvalidInput) {
+			t.Fatalf("expected invalid input, got %v", err)
 		}
 	})
 
@@ -288,6 +315,25 @@ func TestTenantAppService_ExceptionBoundaries(t *testing.T) {
 		}
 	})
 
+	t.Run("update application invalid input", func(t *testing.T) {
+		svc := NewTenantAppService(&fakeTenantRepo{}, &fakeAppRepo{}, &fakeEventBus{}, &fakeTxManager{})
+		err := svc.UpdateApplication(context.Background(), &command.UpdateApplication{
+			AppID: "",
+			Name:  "new",
+		})
+		if !errors.Is(err, shared.ErrInvalidInput) {
+			t.Fatalf("expected invalid input for empty app id, got %v", err)
+		}
+
+		err = svc.UpdateApplication(context.Background(), &command.UpdateApplication{
+			AppID: shared.NewAppID().String(),
+			Name:  "   ",
+		})
+		if !errors.Is(err, shared.ErrInvalidInput) {
+			t.Fatalf("expected invalid input for blank name, got %v", err)
+		}
+	})
+
 	t.Run("update application keeps fields when nil slices", func(t *testing.T) {
 		tenantID := shared.NewTenantID()
 		app := domain.NewApplication(tenantID, "old-name", domain.GenerateClientCredentials(), shared.NewUserID())
@@ -298,10 +344,18 @@ func TestTenantAppService_ExceptionBoundaries(t *testing.T) {
 		svc := NewTenantAppService(&fakeTenantRepo{}, appRepo, &fakeEventBus{}, &fakeTxManager{})
 		err := svc.UpdateApplication(context.Background(), &command.UpdateApplication{
 			AppID: app.ID.String(),
+			Name:  "   ",
+		})
+		if !errors.Is(err, shared.ErrInvalidInput) {
+			t.Fatalf("expected invalid input for blank-only name, got %v", err)
+		}
+
+		err = svc.UpdateApplication(context.Background(), &command.UpdateApplication{
+			AppID: app.ID.String(),
 			Name:  "",
 		})
 		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
+			t.Fatalf("unexpected error for empty name(no update): %v", err)
 		}
 		if appRepo.saved.Name != "old-name" {
 			t.Fatalf("name should remain unchanged when empty name provided")

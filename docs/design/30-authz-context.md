@@ -10,6 +10,7 @@ Authz 上下文负责：
 - 权限定义注册（PermissionDefinition）
 - 统一鉴权决策（`Checker` / `Enforcer`）
 - 订阅跨上下文事件并完成权限编排
+- 保证角色与应用隔离（Role-App boundary）
 
 ## 2. 分层结构
 
@@ -84,6 +85,12 @@ classDiagram
 - 权限定义：`RegisterPermission`、`DeletePermissionDefinition`、`ListPermissionDefinitions`
 - 决策：`CheckPermission`、`CheckResourcePermission`
 
+关键约束（新增）：
+
+- `AssignRole` 必须校验 `role.app_id == cmd.app_id`，跨应用绑定直接拒绝。
+- `AssignRole` 对重复绑定保持幂等：不重复写入、不重复发布 `RoleAssignedEvent`。
+- `CreateRole` / `AssignRole` 做基础输入校验（空 `app_id`、空 `role_id`、空白 `name` 直接返回 `ErrInvalidInput`）。
+
 ## 5. 决策模型
 
 `domain.Enforcer` 判定流程：
@@ -102,12 +109,17 @@ flowchart TD
 Authz 在 `adapter/inbound/event/subscriber.go` 中订阅：
 
 - `application.created`
-  - 初始化系统角色：`super_admin` / `admin` / `member`
-  - 给创建者分配 `super_admin`
+  - 基于模板初始化系统角色：`super_admin` / `admin` / `member`
+  - 给创建者分配 creator-default 角色（默认 `super_admin`）
   - 同步内建权限定义（BuiltinPermissions）
 - `user.registered`
   - 查找默认 `member` 角色
   - 自动给新用户分配角色
+
+错误处理约束（新增）：
+
+- `user.registered` 流程中，仅 `ErrRoleNotFound` 视为可跳过；其余仓储错误必须上抛。
+- `application.created` 流程中，模板读取失败必须上抛，不再静默降级。
 
 ```mermaid
 sequenceDiagram
@@ -119,8 +131,8 @@ sequenceDiagram
 
   Tenant->>Bus: Publish(application.created)
   Bus->>Sub: onApplicationCreated
-  Sub->>RoleRepo: seed super_admin/admin/member
-  Sub->>RoleRepo: assign super_admin to creator
+Sub->>RoleRepo: seed template roles for app
+Sub->>RoleRepo: assign creator-default role to creator
   Sub->>PDRepo: upsert builtin permissions
 ```
 
@@ -133,3 +145,8 @@ sequenceDiagram
 - 不允许时返回 `ErrForbidden`
 
 Tenant / Identity 路由可直接复用该 checker 进行资源鉴权。
+
+## 8. 数据一致性防线（新增）
+
+- 读取用户角色时，仓储层要求 `uar.app_id = roles.app_id`，防止历史脏数据造成跨应用权限串联。
+- 写入用户角色时，仓储层仅允许 `role_id` 属于目标 `app_id` 的记录落库。

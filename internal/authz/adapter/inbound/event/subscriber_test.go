@@ -16,6 +16,7 @@ type fakeRoleRepo struct {
 	savedUserApp []*authzDomain.UserAppRole
 	saveUARErr   error
 	saveRoleErr  error
+	findByNameErr error
 }
 
 func newFakeRoleRepo() *fakeRoleRepo {
@@ -40,9 +41,12 @@ func (f *fakeRoleRepo) FindByID(context.Context, shared.RoleID) (*authzDomain.Ro
 }
 
 func (f *fakeRoleRepo) FindByName(_ context.Context, appID shared.AppID, name string) (*authzDomain.Role, error) {
+	if f.findByNameErr != nil {
+		return nil, f.findByNameErr
+	}
 	role := f.byName[roleKey(appID, name)]
 	if role == nil {
-		return nil, shared.ErrNotFound
+		return nil, authzDomain.ErrRoleNotFound
 	}
 	return role, nil
 }
@@ -228,7 +232,7 @@ func TestSubscriberOnApplicationCreated_AssignsCreatorRoleFromTemplate(t *testin
 	}
 }
 
-func TestSubscriberOnApplicationCreated_FallbacksToBuiltinTemplates(t *testing.T) {
+func TestSubscriberOnApplicationCreated_TemplateProviderErrorPropagates(t *testing.T) {
 	roleRepo := newFakeRoleRepo()
 	permRepo := &fakePermDefRepo{}
 	txMgr := &fakeTxManager{}
@@ -239,14 +243,8 @@ func TestSubscriberOnApplicationCreated_FallbacksToBuiltinTemplates(t *testing.T
 		appID:    shared.NewAppID(),
 		tenantID: shared.NewTenantID(),
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(roleRepo.savedRoles) != len(authzDomain.BuiltinTemplateRoles()) {
-		t.Fatalf("fallback template seed mismatch: got %d want %d", len(roleRepo.savedRoles), len(authzDomain.BuiltinTemplateRoles()))
-	}
-	if len(roleRepo.savedUserApp) != 0 {
-		t.Fatalf("did not expect creator assignment when createdBy is empty")
+	if err == nil {
+		t.Fatalf("expected template provider error")
 	}
 }
 
@@ -290,6 +288,21 @@ func TestSubscriberOnUserRegistered_MissingMemberRoleIsNoop(t *testing.T) {
 	}
 	if len(roleRepo.savedUserApp) != 0 {
 		t.Fatalf("no assignment expected when member role missing")
+	}
+}
+
+func TestSubscriberOnUserRegistered_FindRoleInfraErrorPropagates(t *testing.T) {
+	roleRepo := newFakeRoleRepo()
+	roleRepo.findByNameErr = errors.New("db unavailable")
+	sub := NewSubscriber(roleRepo, &fakeTemplateProvider{}, &fakePermDefRepo{}, &fakeEventBus{}, &fakeTxManager{})
+
+	err := sub.onUserRegistered(context.Background(), fakeUserRegisteredEvent{
+		userID:   shared.NewUserID(),
+		appID:    shared.NewAppID(),
+		tenantID: shared.NewTenantID(),
+	})
+	if err == nil {
+		t.Fatalf("expected infra error to propagate")
 	}
 }
 

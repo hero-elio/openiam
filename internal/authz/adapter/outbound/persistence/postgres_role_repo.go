@@ -143,7 +143,7 @@ func (r *PostgresRoleRepository) FindByUserAndApp(ctx context.Context, userID sh
 	err := sqlx.SelectContext(ctx, conn, &rows, `
 		SELECT r.* FROM roles r
 		JOIN user_app_roles uar ON uar.role_id = r.id
-		WHERE uar.user_id = $1 AND uar.app_id = $2`,
+		WHERE uar.user_id = $1 AND uar.app_id = $2 AND r.app_id = uar.app_id`,
 		userID.String(), appID.String())
 	if err != nil {
 		return nil, err
@@ -207,17 +207,51 @@ func (r *PostgresRoleRepository) SaveUserAppRole(ctx context.Context, uar *domai
 
 	const q = `
 		INSERT INTO user_app_roles (user_id, app_id, role_id, tenant_id, assigned_at)
-		VALUES ($1, $2, $3, $4, $5)
+		SELECT $1::varchar, $2::varchar, $3::varchar, $4::varchar, $5::timestamptz
+		WHERE EXISTS (SELECT 1 FROM roles WHERE id = $3::varchar AND app_id = $2::varchar)
 		ON CONFLICT (user_id, app_id, role_id) DO NOTHING`
 
-	_, err := conn.ExecContext(ctx, q,
+	res, err := conn.ExecContext(ctx, q,
 		uar.UserID.String(),
 		uar.AppID.String(),
 		uar.RoleID.String(),
 		uar.TenantID.String(),
 		uar.AssignedAt,
 	)
-	return err
+	if err != nil {
+		return err
+	}
+
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected > 0 {
+		return nil
+	}
+
+	// Idempotent path: assignment already exists.
+	var exists bool
+	if err := sqlx.GetContext(ctx, conn, &exists, `
+		SELECT EXISTS (
+			SELECT 1 FROM user_app_roles
+			WHERE user_id = $1 AND app_id = $2 AND role_id = $3
+		)`,
+		uar.UserID.String(), uar.AppID.String(), uar.RoleID.String()); err != nil {
+		return err
+	}
+	if exists {
+		return nil
+	}
+
+	// Role exists but app mismatch should surface as business error.
+	if err := sqlx.GetContext(ctx, conn, &exists, `SELECT EXISTS (SELECT 1 FROM roles WHERE id = $1)`, uar.RoleID.String()); err != nil {
+		return err
+	}
+	if exists {
+		return domain.ErrRoleAppMismatch
+	}
+	return domain.ErrRoleNotFound
 }
 
 func (r *PostgresRoleRepository) DeleteUserAppRole(ctx context.Context, userID shared.UserID, appID shared.AppID, roleID shared.RoleID) error {

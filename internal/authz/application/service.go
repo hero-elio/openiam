@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	shared "openiam/internal/shared/domain"
@@ -86,11 +87,15 @@ func NewAuthzAppService(
 func (s *AuthzAppService) CreateRole(ctx context.Context, cmd *command.CreateRole) (shared.RoleID, error) {
 	appID := shared.AppID(cmd.AppID)
 	tenantID := shared.TenantID(cmd.TenantID)
+	name := strings.TrimSpace(cmd.Name)
+	if appID == "" || name == "" {
+		return "", shared.ErrInvalidInput
+	}
 
-	role := domain.NewRole(appID, tenantID, cmd.Name, cmd.Description)
+	role := domain.NewRole(appID, tenantID, name, cmd.Description)
 
 	if err := s.txManager.Execute(ctx, func(txCtx context.Context) error {
-		existing, err := s.roleRepo.FindByName(txCtx, appID, cmd.Name)
+		existing, err := s.roleRepo.FindByName(txCtx, appID, name)
 		if err != nil && err != domain.ErrRoleNotFound {
 			return err
 		}
@@ -127,9 +132,16 @@ func (s *AuthzAppService) AssignRole(ctx context.Context, cmd *command.AssignRol
 	appID := shared.AppID(cmd.AppID)
 	roleID := shared.RoleID(cmd.RoleID)
 	tenantID := shared.TenantID(cmd.TenantID)
+	if userID == "" || appID == "" || roleID == "" {
+		return shared.ErrInvalidInput
+	}
 
-	if _, err := s.roleRepo.FindByID(ctx, roleID); err != nil {
+	role, err := s.roleRepo.FindByID(ctx, roleID)
+	if err != nil {
 		return err
+	}
+	if role.AppID != appID {
+		return domain.ErrRoleAppMismatch
 	}
 
 	uar := &domain.UserAppRole{
@@ -141,6 +153,17 @@ func (s *AuthzAppService) AssignRole(ctx context.Context, cmd *command.AssignRol
 	}
 
 	return s.txManager.Execute(ctx, func(txCtx context.Context) error {
+		existingAssignments, err := s.roleRepo.FindUserAppRoles(txCtx, userID, appID)
+		if err != nil {
+			return err
+		}
+		for _, assigned := range existingAssignments {
+			if assigned.RoleID == roleID {
+				// Keep assignment idempotent: do not emit duplicate events.
+				return nil
+			}
+		}
+
 		if err := s.roleRepo.SaveUserAppRole(txCtx, uar); err != nil {
 			return err
 		}

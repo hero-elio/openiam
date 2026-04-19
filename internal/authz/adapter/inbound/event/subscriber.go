@@ -2,6 +2,7 @@ package event
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"time"
 
@@ -70,6 +71,9 @@ func (s *Subscriber) onUserRegistered(ctx context.Context, evt shared.DomainEven
 
 	memberRole, err := s.roleRepo.FindByName(ctx, appID, defaultRoleName)
 	if err != nil {
+		if !errors.Is(err, domain.ErrRoleNotFound) {
+			return err
+		}
 		slog.Warn("default member role not found, skipping auto-assign", "user_id", userID.String(), "error", err)
 		return nil
 	}
@@ -102,7 +106,10 @@ func (s *Subscriber) onApplicationCreated(ctx context.Context, evt shared.Domain
 	tenantID := payload.GetTenantID()
 	createdBy := payload.GetCreatedBy()
 
-	templates := s.resolveTemplates(ctx, tenantID)
+	templates, err := s.resolveTemplates(ctx, tenantID)
+	if err != nil {
+		return err
+	}
 	slog.Info("resolved template roles for new application",
 		"app_id", appID.String(), "count", len(templates))
 
@@ -138,12 +145,15 @@ func (s *Subscriber) onApplicationCreated(ctx context.Context, evt shared.Domain
 
 // resolveTemplates returns template roles for the tenant.
 // Falls back to builtin defaults when no DB templates exist.
-func (s *Subscriber) resolveTemplates(ctx context.Context, tenantID shared.TenantID) []*domain.Role {
+func (s *Subscriber) resolveTemplates(ctx context.Context, tenantID shared.TenantID) ([]*domain.Role, error) {
 	templates, err := s.templateProv.FindTemplates(ctx, tenantID)
-	if err == nil && len(templates) > 0 {
-		return templates
+	if err != nil {
+		return nil, err
 	}
-	return domain.BuiltinTemplateRoles()
+	if len(templates) > 0 {
+		return templates, nil
+	}
+	return domain.BuiltinTemplateRoles(), nil
 }
 
 // seedRolesFromTemplates clones template roles into the new app.
@@ -159,6 +169,9 @@ func (s *Subscriber) seedRolesFromTemplates(ctx context.Context, appID shared.Ap
 			}
 			slog.Info("role already exists, skipping", "role", tmpl.Name, "app_id", appID.String())
 			continue
+		}
+		if err != nil && !errors.Is(err, domain.ErrRoleNotFound) {
+			return nil, err
 		}
 
 		role := tmpl.CloneForApp(appID, tenantID)

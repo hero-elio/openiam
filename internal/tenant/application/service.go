@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	shared "openiam/internal/shared/domain"
@@ -55,7 +56,11 @@ func NewTenantAppService(
 }
 
 func (s *TenantAppService) CreateTenant(ctx context.Context, cmd *command.CreateTenant) (shared.TenantID, error) {
-	tenant := domain.NewTenant(cmd.Name)
+	name := strings.TrimSpace(cmd.Name)
+	if name == "" {
+		return "", shared.ErrInvalidInput
+	}
+	tenant := domain.NewTenant(name)
 
 	if err := s.txManager.Execute(ctx, func(txCtx context.Context) error {
 		if err := s.tenantRepo.Save(txCtx, tenant); err != nil {
@@ -79,9 +84,13 @@ func (s *TenantAppService) GetTenant(ctx context.Context, q *query.GetTenant) (*
 
 func (s *TenantAppService) CreateApplication(ctx context.Context, cmd *command.CreateApplication) (*CreateApplicationResult, error) {
 	tenantID := shared.TenantID(cmd.TenantID)
+	name := strings.TrimSpace(cmd.Name)
+	if tenantID.IsEmpty() || name == "" {
+		return nil, shared.ErrInvalidInput
+	}
 	creds := domain.GenerateClientCredentials()
 	createdBy := shared.UserID(cmd.CreatedBy)
-	app := domain.NewApplication(tenantID, cmd.Name, creds, createdBy)
+	app := domain.NewApplication(tenantID, name, creds, createdBy)
 
 	if err := s.txManager.Execute(ctx, func(txCtx context.Context) error {
 		if _, err := s.tenantRepo.FindByID(txCtx, tenantID); err != nil {
@@ -123,6 +132,13 @@ func (s *TenantAppService) ListApplications(ctx context.Context, q *query.ListAp
 }
 
 func (s *TenantAppService) UpdateApplication(ctx context.Context, cmd *command.UpdateApplication) error {
+	if strings.TrimSpace(cmd.AppID) == "" {
+		return shared.ErrInvalidInput
+	}
+	if cmd.Name != "" && strings.TrimSpace(cmd.Name) == "" {
+		return shared.ErrInvalidInput
+	}
+
 	return s.txManager.Execute(ctx, func(txCtx context.Context) error {
 		app, err := s.appRepo.FindByID(txCtx, shared.AppID(cmd.AppID))
 		if err != nil {
@@ -130,7 +146,7 @@ func (s *TenantAppService) UpdateApplication(ctx context.Context, cmd *command.U
 		}
 
 		if cmd.Name != "" {
-			app.Name = cmd.Name
+			app.Name = strings.TrimSpace(cmd.Name)
 		}
 		if cmd.RedirectURIs != nil {
 			app.RedirectURIs = cmd.RedirectURIs

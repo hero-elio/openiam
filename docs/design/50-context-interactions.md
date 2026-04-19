@@ -35,8 +35,9 @@ sequenceDiagram
 
   TApp->>Bus: Publish(application.created)
   Bus->>ASub: onApplicationCreated
-  ASub->>RoleRepo: seed system roles
-  ASub->>RoleRepo: assign super_admin to creator
+ASub->>RoleRepo: load template roles
+ASub->>RoleRepo: seed runtime roles in target app
+ASub->>RoleRepo: assign creator-default role to creator
   ASub->>PermRepo: sync builtin permissions
 ```
 
@@ -44,6 +45,8 @@ sequenceDiagram
 
 - 业务写库与事件发布在各自事务边界内完成
 - 当前实现为内存总线同步处理，订阅者失败会回传错误
+- 模板读取失败会中断 `application.created` 处理，不做静默降级
+- 角色绑定对重复请求保持幂等，不重复发布授权事件
 
 ## 3. 关键交互 2：注册用户后的凭据与角色编排
 
@@ -64,6 +67,11 @@ sequenceDiagram
   Bus->>ASub: onUserRegistered
   ASub->>RoleRepo: Find member role and assign
 ```
+
+边界约束：
+
+- 仅当 `member` 角色确实不存在时允许跳过自动分配；仓储/基础设施异常会回传错误。
+- 用户角色查询与写入都要求角色和应用 ID 一致，防止跨应用权限串联。
 
 收益：
 
