@@ -18,36 +18,50 @@ import (
 )
 
 type Handler struct {
-	svc *application.AuthzAppService
+	svc   *application.AuthzAppService
+	check sharedAuth.Checker
 }
 
-func NewHandler(svc *application.AuthzAppService) *Handler {
-	return &Handler{svc: svc}
+func NewHandler(svc *application.AuthzAppService, check sharedAuth.Checker) *Handler {
+	return &Handler{svc: svc, check: check}
+}
+
+// require wraps the protocol-agnostic Checker as chi middleware.
+func (h *Handler) require(resource, action string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if err := h.check(r.Context(), resource, action); err != nil {
+				writeError(w, http.StatusForbidden, "forbidden", "insufficient permissions")
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 func (h *Handler) Routes() chi.Router {
 	r := chi.NewRouter()
 
-	r.Post("/roles", h.handleCreateRole)
-	r.Get("/roles", h.handleListRoles)
-	r.Delete("/roles/{id}", h.handleDeleteRole)
-	r.Post("/roles/{id}/permissions", h.handleGrantPermission)
-	r.Delete("/roles/{id}/permissions", h.handleRevokePermission)
+	r.With(h.require("roles", "create")).Post("/roles", h.handleCreateRole)
+	r.With(h.require("roles", "read")).Get("/roles", h.handleListRoles)
+	r.With(h.require("roles", "delete")).Delete("/roles/{id}", h.handleDeleteRole)
+	r.With(h.require("permissions", "grant")).Post("/roles/{id}/permissions", h.handleGrantPermission)
+	r.With(h.require("permissions", "revoke")).Delete("/roles/{id}/permissions", h.handleRevokePermission)
 
-	r.Post("/users/{uid}/roles", h.handleAssignRole)
-	r.Delete("/users/{uid}/roles/{rid}", h.handleUnassignRole)
-	r.Get("/users/{uid}/roles", h.handleListUserRoles)
+	r.With(h.require("roles", "assign")).Post("/users/{uid}/roles", h.handleAssignRole)
+	r.With(h.require("roles", "assign")).Delete("/users/{uid}/roles/{rid}", h.handleUnassignRole)
+	r.With(h.require("roles", "read")).Get("/users/{uid}/roles", h.handleListUserRoles)
 
-	r.Post("/check", h.handleCheckPermission)
+	r.With(h.require("permissions", "check")).Post("/check", h.handleCheckPermission)
 
-	r.Post("/resources/permissions", h.handleGrantResourcePermission)
-	r.Delete("/resources/permissions", h.handleRevokeResourcePermission)
-	r.Post("/resources/check", h.handleCheckResourcePermission)
-	r.Get("/resources/permissions", h.handleListResourcePermissions)
+	r.With(h.require("resources", "grant")).Post("/resources/permissions", h.handleGrantResourcePermission)
+	r.With(h.require("resources", "revoke")).Delete("/resources/permissions", h.handleRevokeResourcePermission)
+	r.With(h.require("permissions", "check")).Post("/resources/check", h.handleCheckResourcePermission)
+	r.With(h.require("resources", "read")).Get("/resources/permissions", h.handleListResourcePermissions)
 
-	r.Post("/permissions", h.handleRegisterPermission)
-	r.Get("/permissions", h.handleListPermissionDefinitions)
-	r.Delete("/permissions", h.handleDeletePermission)
+	r.With(h.require("permissions", "create")).Post("/permissions", h.handleRegisterPermission)
+	r.With(h.require("permissions", "read")).Get("/permissions", h.handleListPermissionDefinitions)
+	r.With(h.require("permissions", "delete")).Delete("/permissions", h.handleDeletePermission)
 
 	return r
 }

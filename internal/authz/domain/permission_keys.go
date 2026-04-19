@@ -1,10 +1,12 @@
 package domain
 
 const (
-	ResourceUsers       = "users"
-	ResourceRoles       = "roles"
-	ResourcePermissions = "permissions"
-	ResourceResources   = "resources"
+	ResourceTenants      = "tenants"
+	ResourceApplications = "applications"
+	ResourceUsers        = "users"
+	ResourceRoles        = "roles"
+	ResourcePermissions  = "permissions"
+	ResourceResources    = "resources"
 )
 
 const (
@@ -26,6 +28,14 @@ type BuiltinPermissionDef struct {
 }
 
 var BuiltinPermissions = []BuiltinPermissionDef{
+	{ResourceTenants, ActionCreate, "Create tenants"},
+	{ResourceTenants, ActionRead, "View tenants"},
+	{ResourceTenants, ActionUpdate, "Update tenants"},
+	{ResourceTenants, ActionDelete, "Delete tenants"},
+	{ResourceApplications, ActionCreate, "Create applications"},
+	{ResourceApplications, ActionRead, "View applications"},
+	{ResourceApplications, ActionUpdate, "Update applications"},
+	{ResourceApplications, ActionDelete, "Delete applications"},
 	{ResourceRoles, ActionCreate, "Create roles"},
 	{ResourceRoles, ActionRead, "View roles"},
 	{ResourceRoles, ActionUpdate, "Update roles and their permissions"},
@@ -34,5 +44,13 @@ var BuiltinPermissions = []BuiltinPermissionDef{
 	{ResourceUsers, ActionRead, "View user list and profiles"},
 	{ResourceUsers, ActionUpdate, "Update user profiles"},
 	{ResourceUsers, ActionDelete, "Delete users"},
+	{ResourcePermissions, ActionGrant, "Grant permissions"},
+	{ResourcePermissions, ActionRevoke, "Revoke permissions"},
 	{ResourcePermissions, ActionCheck, "Check permissions via API"},
+	{ResourcePermissions, ActionRead, "View permission definitions"},
+	{ResourcePermissions, ActionCreate, "Register permission definitions"},
+	{ResourcePermissions, ActionDelete, "Delete permission definitions"},
+	{ResourceResources, ActionGrant, "Grant resource-level permissions"},
+	{ResourceResources, ActionRevoke, "Revoke resource-level permissions"},
+	{ResourceResources, ActionRead, "View resource-level permissions"},
 }

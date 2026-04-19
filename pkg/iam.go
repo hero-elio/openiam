@@ -23,6 +23,7 @@ import (
 	authzRest "openiam/internal/authz/adapter/inbound/rest"
 	authzPersistence "openiam/internal/authz/adapter/outbound/persistence"
 	authzApp "openiam/internal/authz/application"
+	authzQuery "openiam/internal/authz/application/query"
 	authzDomain "openiam/internal/authz/domain"
 
 	identityRest "openiam/internal/identity/adapter/inbound/rest"
@@ -34,6 +35,7 @@ import (
 	tenantApp "openiam/internal/tenant/application"
 
 	shared "openiam/internal/shared/domain"
+	sharedAuth "openiam/internal/shared/auth"
 	"openiam/internal/shared/infra/eventbus"
 	"openiam/internal/shared/infra/persistence"
 
@@ -103,7 +105,6 @@ func New(cfg Config, logger *slog.Logger) (*Engine, error) {
 	// --- Identity ---
 	userRepo := identityPersistence.NewPostgresUserRepository(db)
 	identitySvc := identityApp.NewIdentityService(userRepo, bus, txMgr)
-	identityHandler := identityRest.NewHandler(identitySvc)
 
 	// --- Authn ---
 	credRepo := authnPersistence.NewPostgresCredentialRepo(db)
@@ -173,7 +174,34 @@ func New(cfg Config, logger *slog.Logger) (*Engine, error) {
 	permDefRepo := authzPersistence.NewPostgresPermissionDefinitionRepository(db)
 	enforcer := authzDomain.NewEnforcer(roleRepo, resPermRepo)
 	authzSvc := authzApp.NewAuthzAppService(roleRepo, resPermRepo, permDefRepo, enforcer, bus, txMgr)
-	authzHandler := authzRest.NewHandler(authzSvc)
+
+	// Protocol-agnostic permission checker — shared by all adapters.
+	accessCheck := sharedAuth.Checker(func(ctx context.Context, resource, action string) error {
+		claims, ok := sharedAuth.ClaimsFromContext(ctx)
+		if !ok {
+			return shared.ErrUnauthorized
+		}
+		appID := claims.AppID
+		if appID == "" {
+			appID = "default"
+		}
+		result, err := authzSvc.CheckPermission(ctx, &authzQuery.CheckPermission{
+			UserID:   claims.UserID,
+			AppID:    appID,
+			Resource: resource,
+			Action:   action,
+		})
+		if err != nil {
+			return err
+		}
+		if !result.Allowed {
+			return shared.ErrForbidden
+		}
+		return nil
+	})
+
+	authzHandler := authzRest.NewHandler(authzSvc, accessCheck)
+	identityHandler := identityRest.NewHandler(identitySvc, accessCheck)
 
 	authzSub := authzEvent.NewSubscriber(roleRepo, permDefRepo, bus, txMgr)
 	if err = authzSub.Register(); err != nil {
@@ -186,7 +214,7 @@ func New(cfg Config, logger *slog.Logger) (*Engine, error) {
 	tenantRepo := tenantPersistence.NewPostgresTenantRepository(db)
 	appRepo := tenantPersistence.NewPostgresApplicationRepository(db)
 	tenantSvc := tenantApp.NewTenantAppService(tenantRepo, appRepo, bus, txMgr)
-	tenantHandler := tenantRest.NewHandler(tenantSvc)
+	tenantHandler := tenantRest.NewHandler(tenantSvc, accessCheck)
 
 	// --- Router ---
 	r := chi.NewRouter()

@@ -2,29 +2,71 @@ package rest
 
 import (
 	"encoding/json"
+	"errors"
+	"log"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
 
+	sharedAuth "openiam/internal/shared/auth"
 	"openiam/internal/identity/application"
 	"openiam/internal/identity/application/command"
 	"openiam/internal/identity/application/query"
+	"openiam/internal/identity/domain"
 )
 
 type Handler struct {
-	svc *application.IdentityService
+	svc   *application.IdentityService
+	check sharedAuth.Checker
 }
 
-func NewHandler(svc *application.IdentityService) *Handler {
-	return &Handler{svc: svc}
+func NewHandler(svc *application.IdentityService, check sharedAuth.Checker) *Handler {
+	return &Handler{svc: svc, check: check}
+}
+
+// require wraps the protocol-agnostic Checker as chi middleware.
+func (h *Handler) require(resource, action string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if err := h.check(r.Context(), resource, action); err != nil {
+				writeError(w, http.StatusForbidden, "forbidden", "insufficient permissions")
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// requireOwnerOr allows the request if the caller is the resource owner (URL
+// param "id" matches Claims.UserID), otherwise falls back to a permission check.
+func (h *Handler) requireOwnerOr(resource, action string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			claims, ok := sharedAuth.ClaimsFromContext(r.Context())
+			if !ok {
+				writeError(w, http.StatusUnauthorized, "unauthorized", "missing authentication")
+				return
+			}
+			targetUID := chi.URLParam(r, "id")
+			if targetUID == claims.UserID {
+				next.ServeHTTP(w, r)
+				return
+			}
+			if err := h.check(r.Context(), resource, action); err != nil {
+				writeError(w, http.StatusForbidden, "forbidden", "insufficient permissions")
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 func (h *Handler) Routes() chi.Router {
 	r := chi.NewRouter()
 	r.Post("/register", h.handleRegister)
-	r.Get("/{id}", h.handleGetUser)
-	r.Put("/{id}/profile", h.handleUpdateProfile)
-	r.Put("/{id}/password", h.handleChangePassword)
+	r.With(h.requireOwnerOr("users", "read")).Get("/{id}", h.handleGetUser)
+	r.With(h.requireOwnerOr("users", "update")).Put("/{id}/profile", h.handleUpdateProfile)
+	r.With(h.requireOwnerOr("users", "update")).Put("/{id}/password", h.handleChangePassword)
 	return r
 }
 
@@ -134,6 +176,19 @@ func writeError(w http.ResponseWriter, status int, code, message string) {
 }
 
 func writeBusinessError(w http.ResponseWriter, err error) {
-	// TODO: map domain errors to HTTP status codes
-	writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+	switch {
+	case errors.Is(err, domain.ErrUserNotFound):
+		writeError(w, http.StatusNotFound, "user_not_found", "user not found")
+	case errors.Is(err, domain.ErrUserAlreadyExists),
+		errors.Is(err, domain.ErrEmailAlreadyTaken):
+		writeError(w, http.StatusConflict, "user_already_exists", "user already exists")
+	case errors.Is(err, domain.ErrInvalidEmail),
+		errors.Is(err, domain.ErrPasswordTooShort):
+		writeError(w, http.StatusBadRequest, "invalid_input", "invalid input")
+	case errors.Is(err, domain.ErrInvalidPassword):
+		writeError(w, http.StatusUnauthorized, "invalid_password", "invalid password")
+	default:
+		log.Printf("identity handler: unhandled error: %v", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "internal server error")
+	}
 }

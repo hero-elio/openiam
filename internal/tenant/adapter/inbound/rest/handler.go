@@ -16,26 +16,39 @@ import (
 )
 
 type Handler struct {
-	svc *application.TenantAppService
+	svc   *application.TenantAppService
+	check sharedAuth.Checker
 }
 
-func NewHandler(svc *application.TenantAppService) *Handler {
-	return &Handler{svc: svc}
+func NewHandler(svc *application.TenantAppService, check sharedAuth.Checker) *Handler {
+	return &Handler{svc: svc, check: check}
+}
+
+func (h *Handler) require(resource, action string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if err := h.check(r.Context(), resource, action); err != nil {
+				writeError(w, http.StatusForbidden, "forbidden", "insufficient permissions")
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 func (h *Handler) TenantRoutes() chi.Router {
 	r := chi.NewRouter()
-	r.Post("/", h.handleCreateTenant)
-	r.Get("/{tid}", h.handleGetTenant)
-	r.Post("/{tid}/applications", h.handleCreateApplication)
-	r.Get("/{tid}/applications", h.handleListApplications)
+	r.With(h.require("tenants", "create")).Post("/", h.handleCreateTenant)
+	r.With(h.require("tenants", "read")).Get("/{tid}", h.handleGetTenant)
+	r.With(h.require("applications", "create")).Post("/{tid}/applications", h.handleCreateApplication)
+	r.With(h.require("applications", "read")).Get("/{tid}/applications", h.handleListApplications)
 	return r
 }
 
 func (h *Handler) ApplicationRoutes() chi.Router {
 	r := chi.NewRouter()
-	r.Get("/{aid}", h.handleGetApplication)
-	r.Put("/{aid}", h.handleUpdateApplication)
+	r.With(h.require("applications", "read")).Get("/{aid}", h.handleGetApplication)
+	r.With(h.require("applications", "update")).Put("/{aid}", h.handleUpdateApplication)
 	return r
 }
 

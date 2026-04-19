@@ -20,3 +20,10 @@ func ClaimsFromContext(ctx context.Context) (Claims, bool) {
 func ContextWithClaims(ctx context.Context, c Claims) context.Context {
 	return context.WithValue(ctx, claimsKey{}, c)
 }
+
+// Checker verifies whether the caller (identified via context Claims) is
+// permitted to perform the given action on the given resource.
+// Returns nil if allowed, a non-nil error otherwise.
+// This is protocol-agnostic — HTTP handlers, gRPC interceptors, etc. can
+// all depend on the same Checker.
+type Checker func(ctx context.Context, resource, action string) error
