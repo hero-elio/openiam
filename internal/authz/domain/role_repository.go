@@ -18,3 +18,9 @@ type RoleRepository interface {
 	DeleteUserAppRole(ctx context.Context, userID shared.UserID, appID shared.AppID, roleID shared.RoleID) error
 	FindUserAppRoles(ctx context.Context, userID shared.UserID, appID shared.AppID) ([]*UserAppRole, error)
 }
+
+// RoleTemplateProvider resolves template roles used to seed a new application.
+// Kept separate from RoleRepository so consumers only depend on what they need.
+type RoleTemplateProvider interface {
+	FindTemplates(ctx context.Context, tenantID shared.TenantID) ([]*Role, error)
+}

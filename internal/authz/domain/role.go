@@ -8,14 +8,16 @@ import (
 
 type Role struct {
 	shared.AggregateRoot
-	ID          shared.RoleID
-	AppID       shared.AppID
-	TenantID    shared.TenantID
-	Name        string
-	Description string
-	Permissions []Permission
-	IsSystem    bool
-	CreatedAt   time.Time
+	ID                  shared.RoleID
+	AppID               shared.AppID
+	TenantID            shared.TenantID
+	Name                string
+	Description         string
+	Permissions         []Permission
+	IsSystem            bool
+	IsTemplate          bool
+	IsDefaultForCreator bool
+	CreatedAt           time.Time
 }
 
 func NewRole(appID shared.AppID, tenantID shared.TenantID, name, description string) *Role {
@@ -88,4 +90,54 @@ func (r *Role) HasPermission(p Permission) bool {
 		}
 	}
 	return false
+}
+
+// CloneForApp creates a runtime copy of a template role bound to a real app.
+func (r *Role) CloneForApp(appID shared.AppID, tenantID shared.TenantID) *Role {
+	perms := make([]Permission, len(r.Permissions))
+	copy(perms, r.Permissions)
+	return &Role{
+		ID:                  shared.NewRoleID(),
+		AppID:               appID,
+		TenantID:            tenantID,
+		Name:                r.Name,
+		Description:         r.Description,
+		Permissions:         perms,
+		IsSystem:            r.IsSystem,
+		IsDefaultForCreator: r.IsDefaultForCreator,
+		CreatedAt:           time.Now(),
+	}
+}
+
+// BuiltinTemplateRoles returns the hardcoded template roles used when no
+// database templates exist. Matches the legacy systemRoleSeeds behavior.
+func BuiltinTemplateRoles() []*Role {
+	return []*Role{
+		{
+			Name:                "super_admin",
+			Description:         "Super administrator with all permissions",
+			Permissions:         []Permission{NewPermission("*", "*")},
+			IsSystem:            true,
+			IsTemplate:          true,
+			IsDefaultForCreator: true,
+		},
+		{
+			Name:        "admin",
+			Description: "Administrator with user and role management permissions",
+			Permissions: []Permission{
+				NewPermission(ResourceUsers, ActionRead),
+				NewPermission(ResourceUsers, ActionUpdate),
+				NewPermission(ResourceRoles, ActionAll),
+				NewPermission(ResourcePermissions, ActionCheck),
+			},
+			IsSystem:   true,
+			IsTemplate: true,
+		},
+		{
+			Name:        "member",
+			Description: "Basic member role (auto-assigned on registration)",
+			IsSystem:    true,
+			IsTemplate:  true,
+		},
+	}
 }

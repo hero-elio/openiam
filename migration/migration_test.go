@@ -199,8 +199,8 @@ func TestMigrations_InsertExampleData(t *testing.T) {
 		"users":            1,
 		"applications":     1,
 		"credentials":      1,
-		"roles":            1,
-		"role_permissions": 1,
+		"roles":            1 + 3,
+		"role_permissions": 1 + 5,
 		"user_app_roles":   1,
 		"domain_events":    1,
 	}

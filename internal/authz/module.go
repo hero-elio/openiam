@@ -56,7 +56,7 @@ func NewAuthorizer(db *sqlx.DB, bus shared.EventBus, txMgr shared.TxManager) (*A
 
 	handler := authzRest.NewHandler(svc, checker)
 
-	sub := authzEvent.NewSubscriber(roleRepo, permDefRepo, bus, txMgr)
+	sub := authzEvent.NewSubscriber(roleRepo, roleRepo, permDefRepo, bus, txMgr)
 	if err := sub.Register(); err != nil {
 		return nil, fmt.Errorf("register authz event subscriber: %w", err)
 	}

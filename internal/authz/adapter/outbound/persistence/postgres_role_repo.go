@@ -14,14 +14,16 @@ import (
 )
 
 type roleRow struct {
-	ID          string    `db:"id"`
-	AppID       string    `db:"app_id"`
-	TenantID    string    `db:"tenant_id"`
-	Name        string    `db:"name"`
-	Description string    `db:"description"`
-	IsSystem    bool      `db:"is_system"`
-	Version     int       `db:"version"`
-	CreatedAt   time.Time `db:"created_at"`
+	ID                  string    `db:"id"`
+	AppID               string    `db:"app_id"`
+	TenantID            string    `db:"tenant_id"`
+	Name                string    `db:"name"`
+	Description         string    `db:"description"`
+	IsSystem            bool      `db:"is_system"`
+	IsTemplate          bool      `db:"is_template"`
+	IsDefaultForCreator bool      `db:"is_default_for_creator"`
+	Version             int       `db:"version"`
+	CreatedAt           time.Time `db:"created_at"`
 }
 
 type permissionRow struct {
@@ -50,11 +52,13 @@ func (r *PostgresRoleRepository) Save(ctx context.Context, role *domain.Role) er
 	conn := sharedPersistence.Conn(ctx, r.db)
 
 	const upsertRole = `
-		INSERT INTO roles (id, app_id, tenant_id, name, description, is_system, version, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		INSERT INTO roles (id, app_id, tenant_id, name, description, is_system, is_template, is_default_for_creator, version, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		ON CONFLICT (id) DO UPDATE SET
 			name = EXCLUDED.name,
 			description = EXCLUDED.description,
+			is_template = EXCLUDED.is_template,
+			is_default_for_creator = EXCLUDED.is_default_for_creator,
 			version = EXCLUDED.version`
 
 	if _, err := conn.ExecContext(ctx, upsertRole,
@@ -64,6 +68,8 @@ func (r *PostgresRoleRepository) Save(ctx context.Context, role *domain.Role) er
 		role.Name,
 		role.Description,
 		role.IsSystem,
+		role.IsTemplate,
+		role.IsDefaultForCreator,
 		role.Version+1,
 		role.CreatedAt,
 	); err != nil {
@@ -151,11 +157,35 @@ func (r *PostgresRoleRepository) ListByApp(ctx context.Context, appID shared.App
 
 	var rows []roleRow
 	err := sqlx.SelectContext(ctx, conn, &rows,
-		`SELECT * FROM roles WHERE app_id = $1 ORDER BY name`, appID.String())
+		`SELECT * FROM roles WHERE app_id = $1 AND is_template = false ORDER BY name`, appID.String())
 	if err != nil {
 		return nil, err
 	}
 
+	return r.hydrateRoles(ctx, conn, rows)
+}
+
+func (r *PostgresRoleRepository) FindTemplates(ctx context.Context, tenantID shared.TenantID) ([]*domain.Role, error) {
+	conn := sharedPersistence.Conn(ctx, r.db)
+
+	// Tenant-scoped templates take priority over global ones.
+	var rows []roleRow
+	err := sqlx.SelectContext(ctx, conn, &rows,
+		`SELECT * FROM roles WHERE is_template = true AND tenant_id = $1 ORDER BY name`,
+		tenantID.String())
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) > 0 {
+		return r.hydrateRoles(ctx, conn, rows)
+	}
+
+	// Fall back to global templates (tenant_id = '').
+	err = sqlx.SelectContext(ctx, conn, &rows,
+		`SELECT * FROM roles WHERE is_template = true AND tenant_id = '' ORDER BY name`)
+	if err != nil {
+		return nil, err
+	}
 	return r.hydrateRoles(ctx, conn, rows)
 }
 
@@ -252,14 +282,16 @@ func (r *PostgresRoleRepository) hydrateRoles(ctx context.Context, conn sqlx.Ext
 
 func rowToRole(row roleRow, perms []domain.Permission) *domain.Role {
 	r := &domain.Role{
-		ID:          shared.RoleID(row.ID),
-		AppID:       shared.AppID(row.AppID),
-		TenantID:    shared.TenantID(row.TenantID),
-		Name:        row.Name,
-		Description: row.Description,
-		Permissions: perms,
-		IsSystem:    row.IsSystem,
-		CreatedAt:   row.CreatedAt,
+		ID:                  shared.RoleID(row.ID),
+		AppID:               shared.AppID(row.AppID),
+		TenantID:            shared.TenantID(row.TenantID),
+		Name:                row.Name,
+		Description:         row.Description,
+		Permissions:         perms,
+		IsSystem:            row.IsSystem,
+		IsTemplate:          row.IsTemplate,
+		IsDefaultForCreator: row.IsDefaultForCreator,
+		CreatedAt:           row.CreatedAt,
 	}
 	r.Version = row.Version
 	return r

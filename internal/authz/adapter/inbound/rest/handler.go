@@ -509,3 +509,4 @@ func writeBusinessError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusInternalServerError, "internal_error", "internal server error")
 	}
 }
+

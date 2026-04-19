@@ -27,23 +27,26 @@ type applicationCreatedPayload interface {
 }
 
 type Subscriber struct {
-	roleRepo    domain.RoleRepository
-	permDefRepo domain.PermissionDefinitionRepository
-	eventBus    shared.EventBus
-	txManager   shared.TxManager
+	roleRepo     domain.RoleRepository
+	templateProv domain.RoleTemplateProvider
+	permDefRepo  domain.PermissionDefinitionRepository
+	eventBus     shared.EventBus
+	txManager    shared.TxManager
 }
 
 func NewSubscriber(
 	roleRepo domain.RoleRepository,
+	templateProv domain.RoleTemplateProvider,
 	permDefRepo domain.PermissionDefinitionRepository,
 	eventBus shared.EventBus,
 	txManager shared.TxManager,
 ) *Subscriber {
 	return &Subscriber{
-		roleRepo:    roleRepo,
-		permDefRepo: permDefRepo,
-		eventBus:    eventBus,
-		txManager:   txManager,
+		roleRepo:     roleRepo,
+		templateProv: templateProv,
+		permDefRepo:  permDefRepo,
+		eventBus:     eventBus,
+		txManager:    txManager,
 	}
 }
 
@@ -99,106 +102,88 @@ func (s *Subscriber) onApplicationCreated(ctx context.Context, evt shared.Domain
 	tenantID := payload.GetTenantID()
 	createdBy := payload.GetCreatedBy()
 
-	slog.Info("seeding system roles for new application", "app_id", appID.String())
+	templates := s.resolveTemplates(ctx, tenantID)
+	slog.Info("resolved template roles for new application",
+		"app_id", appID.String(), "count", len(templates))
 
 	return s.txManager.Execute(ctx, func(txCtx context.Context) error {
-		superAdminRole, err := s.seedSystemRoles(txCtx, appID, tenantID)
+		creatorRole, err := s.seedRolesFromTemplates(txCtx, appID, tenantID, templates)
 		if err != nil {
 			return err
 		}
 
-		if !createdBy.IsEmpty() && superAdminRole != nil {
+		if !createdBy.IsEmpty() && creatorRole != nil {
 			uar := &domain.UserAppRole{
 				UserID:     createdBy,
 				AppID:      appID,
-				RoleID:     superAdminRole.ID,
+				RoleID:     creatorRole.ID,
 				TenantID:   tenantID,
 				AssignedAt: time.Now(),
 			}
 			if err := s.roleRepo.SaveUserAppRole(txCtx, uar); err != nil {
 				return err
 			}
-			slog.Info("assigned super_admin role to app creator", "user_id", createdBy.String(), "app_id", appID.String())
+			slog.Info("assigned creator role to app creator",
+				"user_id", createdBy.String(), "app_id", appID.String(), "role", creatorRole.Name)
 		}
 
 		if err := s.syncBuiltinPermissions(txCtx, appID); err != nil {
 			return err
 		}
 
-		slog.Info("seeded system roles and synced builtin permissions", "app_id", appID.String())
+		slog.Info("seeded roles and synced builtin permissions", "app_id", appID.String())
 		return nil
 	})
 }
 
-type seedRole struct {
-	name        string
-	description string
-	permissions []domain.Permission
+// resolveTemplates returns template roles for the tenant.
+// Falls back to builtin defaults when no DB templates exist.
+func (s *Subscriber) resolveTemplates(ctx context.Context, tenantID shared.TenantID) []*domain.Role {
+	templates, err := s.templateProv.FindTemplates(ctx, tenantID)
+	if err == nil && len(templates) > 0 {
+		return templates
+	}
+	return domain.BuiltinTemplateRoles()
 }
 
-var systemRoleSeeds = []seedRole{
-	{
-		name:        "super_admin",
-		description: "Super administrator with all permissions",
-		permissions: []domain.Permission{domain.NewPermission("*", "*")},
-	},
-	{
-		name:        "admin",
-		description: "Administrator with user and role management permissions",
-		permissions: []domain.Permission{
-			domain.NewPermission(domain.ResourceUsers, domain.ActionRead),
-			domain.NewPermission(domain.ResourceUsers, domain.ActionUpdate),
-			domain.NewPermission(domain.ResourceRoles, domain.ActionAll),
-			domain.NewPermission(domain.ResourcePermissions, domain.ActionCheck),
-		},
-	},
-	{
-		name:        "member",
-		description: "Basic member role (auto-assigned on registration)",
-		permissions: nil,
-	},
-}
+// seedRolesFromTemplates clones template roles into the new app.
+// Returns the role marked as IsDefaultForCreator (if any).
+func (s *Subscriber) seedRolesFromTemplates(ctx context.Context, appID shared.AppID, tenantID shared.TenantID, templates []*domain.Role) (*domain.Role, error) {
+	var creatorRole *domain.Role
 
-func (s *Subscriber) seedSystemRoles(ctx context.Context, appID shared.AppID, tenantID shared.TenantID) (*domain.Role, error) {
-	var superAdminRole *domain.Role
-
-	for _, seed := range systemRoleSeeds {
-		existing, err := s.roleRepo.FindByName(ctx, appID, seed.name)
+	for _, tmpl := range templates {
+		existing, err := s.roleRepo.FindByName(ctx, appID, tmpl.Name)
 		if err == nil && existing != nil {
-			if seed.name == "super_admin" {
-				superAdminRole = existing
+			if tmpl.IsDefaultForCreator {
+				creatorRole = existing
 			}
-			slog.Info("system role already exists, skipping", "role", seed.name, "app_id", appID.String())
+			slog.Info("role already exists, skipping", "role", tmpl.Name, "app_id", appID.String())
 			continue
 		}
 
-		role := domain.NewSystemRole(appID, tenantID, seed.name, seed.description)
-		for _, perm := range seed.permissions {
-			_ = role.GrantPermission(perm)
-		}
-
+		role := tmpl.CloneForApp(appID, tenantID)
 		if err := s.roleRepo.Save(ctx, role); err != nil {
-			slog.Error("failed to seed system role", "role", seed.name, "error", err)
+			slog.Error("failed to seed role from template", "role", tmpl.Name, "error", err)
 			return nil, err
 		}
 
-		if seed.name == "super_admin" {
-			superAdminRole = role
+		if tmpl.IsDefaultForCreator {
+			creatorRole = role
 		}
 	}
 
-	return superAdminRole, nil
+	return creatorRole, nil
 }
 
 func (s *Subscriber) syncBuiltinPermissions(ctx context.Context, appID shared.AppID) error {
 	for _, bp := range domain.BuiltinPermissions {
 		pd := &domain.PermissionDefinition{
-			AppID:     appID,
-			Resource:  bp.Resource,
-			Action:    bp.Action,
+			AppID:       appID,
+			Resource:    bp.Resource,
+			Action:      bp.Action,
 			Description: bp.Description,
-			IsBuiltin: true,
-			CreatedAt: time.Now(),
+			IsBuiltin:   true,
+			CreatedAt:   time.Now(),
 		}
 		if err := s.permDefRepo.Upsert(ctx, pd); err != nil {
 			return err
