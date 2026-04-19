@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"openiam/internal/authn/domain"
+	identityDomain "openiam/internal/identity/domain"
 	shared "openiam/internal/shared/domain"
 )
 
@@ -56,7 +57,7 @@ func (s *SMSStrategy) Type() domain.CredentialType {
 func (s *SMSStrategy) Challenge(ctx context.Context, req *domain.ChallengeRequest) (*domain.ChallengeResponse, error) {
 	var p smsChallengeParams
 	if err := json.Unmarshal(req.Params, &p); err != nil || p.Phone == "" {
-		return nil, shared.ErrInvalidCredential
+		return nil, domain.ErrInvalidCredential
 	}
 
 	code, err := generateDigitCode(6)
@@ -96,25 +97,25 @@ func (s *SMSStrategy) Challenge(ctx context.Context, req *domain.ChallengeReques
 func (s *SMSStrategy) Authenticate(ctx context.Context, req *domain.AuthnRequest) (*domain.AuthnResult, error) {
 	var p smsVerifyParams
 	if err := json.Unmarshal(req.Params, &p); err != nil {
-		return nil, shared.ErrInvalidCredential
+		return nil, domain.ErrInvalidCredential
 	}
 	if p.Phone == "" || p.Code == "" {
-		return nil, shared.ErrInvalidCredential
+		return nil, domain.ErrInvalidCredential
 	}
 
 	challengeID := fmt.Sprintf("sms:%s:%s", req.AppID, p.Phone)
 	raw, err := s.challengeStore.Get(ctx, challengeID)
 	if err != nil {
-		return nil, shared.ErrChallengeNotFound
+		return nil, domain.ErrChallengeNotFound
 	}
 
 	var cd smsChallengeData
 	if err := json.Unmarshal(raw, &cd); err != nil {
-		return nil, shared.ErrChallengeInvalid
+		return nil, domain.ErrChallengeInvalid
 	}
 
 	if cd.Code != p.Code {
-		return nil, shared.ErrInvalidCredential
+		return nil, domain.ErrInvalidCredential
 	}
 
 	_ = s.challengeStore.Delete(ctx, challengeID)
@@ -131,9 +132,9 @@ func (s *SMSStrategy) Authenticate(ctx context.Context, req *domain.AuthnRequest
 
 	switch info.Status {
 	case "disabled":
-		return nil, shared.ErrUserDisabled
+		return nil, identityDomain.ErrUserDisabled
 	case "locked":
-		return nil, shared.ErrUserLocked
+		return nil, identityDomain.ErrUserLocked
 	case "active":
 	default:
 		return nil, shared.ErrUnauthorized

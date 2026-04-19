@@ -1,30 +1,17 @@
 package middleware
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
 
+	"github.com/go-chi/chi/v5"
+
 	authnDomain "openiam/internal/authn/domain"
 	authzApp "openiam/internal/authz/application"
 	authzQuery "openiam/internal/authz/application/query"
+	sharedAuth "openiam/internal/shared/auth"
 )
-
-type claimsKey struct{}
-
-type Claims struct {
-	UserID    string
-	TenantID  string
-	AppID     string
-	SessionID string
-	Roles     []string
-}
-
-func ClaimsFromContext(ctx context.Context) (Claims, bool) {
-	c, ok := ctx.Value(claimsKey{}).(Claims)
-	return c, ok
-}
 
 func BearerAuth(tokenProvider authnDomain.TokenProvider) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
@@ -39,7 +26,7 @@ func BearerAuth(tokenProvider authnDomain.TokenProvider) func(http.Handler) http
 				writeErr(w, http.StatusUnauthorized, "unauthorized", "invalid token")
 				return
 			}
-			ctx := context.WithValue(r.Context(), claimsKey{}, Claims{
+			ctx := sharedAuth.ContextWithClaims(r.Context(), sharedAuth.Claims{
 				UserID:    tc.UserID,
 				TenantID:  tc.TenantID,
 				AppID:     tc.AppID,
@@ -54,7 +41,7 @@ func BearerAuth(tokenProvider authnDomain.TokenProvider) func(http.Handler) http
 func RequirePermission(authzSvc *authzApp.AuthzAppService, resource, action string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			claims, ok := ClaimsFromContext(r.Context())
+			claims, ok := sharedAuth.ClaimsFromContext(r.Context())
 			if !ok {
 				writeErr(w, http.StatusUnauthorized, "unauthorized", "no claims in context")
 				return
@@ -97,4 +84,24 @@ func writeErr(w http.ResponseWriter, status int, code, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(map[string]string{"code": code, "message": message})
+}
+
+func RequireOwnerOrPermission(authzSvc *authzApp.AuthzAppService, resource, action, userIDParam string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			claims, ok := sharedAuth.ClaimsFromContext(r.Context())
+			if !ok {
+				writeErr(w, http.StatusUnauthorized, "unauthorized", "no claims in context")
+				return
+			}
+
+			targetUID := chi.URLParam(r, userIDParam)
+			if targetUID == claims.UserID {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			RequirePermission(authzSvc, resource, action)(next).ServeHTTP(w, r)
+		})
+	}
 }

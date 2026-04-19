@@ -13,6 +13,7 @@ import (
 	"github.com/go-webauthn/webauthn/protocol"
 
 	authnDomain "openiam/internal/authn/domain"
+	identityDomain "openiam/internal/identity/domain"
 	shared "openiam/internal/shared/domain"
 )
 
@@ -113,31 +114,31 @@ func (s *WebAuthnStrategy) Challenge(ctx context.Context, req *authnDomain.Chall
 func (s *WebAuthnStrategy) Authenticate(ctx context.Context, req *authnDomain.AuthnRequest) (*authnDomain.AuthnResult, error) {
 	var p webAuthnLoginParams
 	if err := json.Unmarshal(req.Params, &p); err != nil {
-		return nil, shared.ErrInvalidCredential
+		return nil, authnDomain.ErrInvalidCredential
 	}
 	if p.ChallengeID == "" || p.RawID == "" || p.Signature == "" {
 		var registerPayload webAuthnBindParams
 		if err := json.Unmarshal(req.Params, &registerPayload); err != nil {
-			return nil, shared.ErrInvalidCredential
+			return nil, authnDomain.ErrInvalidCredential
 		}
 		return s.authenticateViaRegistration(ctx, req, registerPayload)
 	}
 
 	sessionJSON, err := s.challengeStore.Get(ctx, p.ChallengeID)
 	if err != nil {
-		return nil, shared.ErrChallengeNotFound
+		return nil, authnDomain.ErrChallengeNotFound
 	}
 
 	var sessionData gowebauthn.SessionData
 	if err := json.Unmarshal(sessionJSON, &sessionData); err != nil {
-		return nil, shared.ErrChallengeInvalid
+		return nil, authnDomain.ErrChallengeInvalid
 	}
 
 	_ = s.challengeStore.Delete(ctx, p.ChallengeID)
 
 	parsedResponse, err := buildAssertionResponse(p)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", shared.ErrInvalidCredential, err)
+		return nil, fmt.Errorf("%w: %v", authnDomain.ErrInvalidCredential, err)
 	}
 
 	credSubject := base64.RawURLEncoding.EncodeToString(parsedResponse.RawID)
@@ -154,9 +155,9 @@ func (s *WebAuthnStrategy) Authenticate(ctx context.Context, req *authnDomain.Au
 
 	switch info.Status {
 	case "disabled":
-		return nil, shared.ErrUserDisabled
+		return nil, identityDomain.ErrUserDisabled
 	case "locked":
-		return nil, shared.ErrUserLocked
+		return nil, identityDomain.ErrUserLocked
 	case "active":
 	default:
 		return nil, shared.ErrUnauthorized
@@ -169,7 +170,7 @@ func (s *WebAuthnStrategy) Authenticate(ctx context.Context, req *authnDomain.Au
 
 	validatedCred, err := s.wa.ValidateLogin(waUser, sessionData, parsedResponse)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", shared.ErrInvalidCredential, err)
+		return nil, fmt.Errorf("%w: %v", authnDomain.ErrInvalidCredential, err)
 	}
 
 	cred.MarkUsed()
@@ -193,16 +194,16 @@ func (s *WebAuthnStrategy) authenticateViaRegistration(
 	p webAuthnBindParams,
 ) (*authnDomain.AuthnResult, error) {
 	if p.ChallengeID == "" || p.RawID == "" || p.PublicKey == "" {
-		return nil, shared.ErrInvalidCredential
+		return nil, authnDomain.ErrInvalidCredential
 	}
 
 	sessionJSON, err := s.challengeStore.Get(ctx, p.ChallengeID)
 	if err != nil {
-		return nil, shared.ErrChallengeNotFound
+		return nil, authnDomain.ErrChallengeNotFound
 	}
 	var sessionData gowebauthn.SessionData
 	if err := json.Unmarshal(sessionJSON, &sessionData); err != nil {
-		return nil, shared.ErrChallengeInvalid
+		return nil, authnDomain.ErrChallengeInvalid
 	}
 	_ = sessionData
 	_ = s.challengeStore.Delete(ctx, p.ChallengeID)
@@ -220,7 +221,7 @@ func (s *WebAuthnStrategy) authenticateViaRegistration(
 			IsNew:    false,
 		}, nil
 	}
-	if !errors.Is(err, shared.ErrCredentialNotFound) {
+	if !errors.Is(err, authnDomain.ErrCredentialNotFound) {
 		return nil, err
 	}
 
@@ -248,20 +249,20 @@ func (s *WebAuthnStrategy) authenticateViaRegistration(
 func (s *WebAuthnStrategy) VerifyAndBind(ctx context.Context, req *authnDomain.AuthnRequest, userID shared.UserID) error {
 	var p webAuthnBindParams
 	if err := json.Unmarshal(req.Params, &p); err != nil {
-		return shared.ErrInvalidCredential
+		return authnDomain.ErrInvalidCredential
 	}
 	if p.ChallengeID == "" || p.RawID == "" {
-		return shared.ErrInvalidCredential
+		return authnDomain.ErrInvalidCredential
 	}
 
 	sessionJSON, err := s.challengeStore.Get(ctx, p.ChallengeID)
 	if err != nil {
-		return shared.ErrChallengeNotFound
+		return authnDomain.ErrChallengeNotFound
 	}
 
 	var sessionData gowebauthn.SessionData
 	if err := json.Unmarshal(sessionJSON, &sessionData); err != nil {
-		return shared.ErrChallengeInvalid
+		return authnDomain.ErrChallengeInvalid
 	}
 
 	_ = s.challengeStore.Delete(ctx, p.ChallengeID)
@@ -271,11 +272,11 @@ func (s *WebAuthnStrategy) VerifyAndBind(ctx context.Context, req *authnDomain.A
 	existing, err := s.credRepo.FindBySubjectAndType(ctx, credSubject, req.AppID, authnDomain.CredentialWebAuthn)
 	if err == nil {
 		if existing.UserID != userID {
-			return shared.ErrCredentialAlreadyBound
+			return authnDomain.ErrCredentialAlreadyBound
 		}
-		return shared.ErrCredentialAlreadyExists
+		return authnDomain.ErrCredentialAlreadyExists
 	}
-	if !errors.Is(err, shared.ErrCredentialNotFound) {
+	if !errors.Is(err, authnDomain.ErrCredentialNotFound) {
 		return err
 	}
 

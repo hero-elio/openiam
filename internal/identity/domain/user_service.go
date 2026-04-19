@@ -20,7 +20,7 @@ func (s *UserDomainService) CheckEmailUniqueness(ctx context.Context, tenantID s
 		return err
 	}
 	if exists {
-		return shared.ErrEmailAlreadyTaken
+		return ErrEmailAlreadyTaken
 	}
 	return nil
 }

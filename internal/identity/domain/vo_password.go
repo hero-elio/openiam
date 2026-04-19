@@ -1,8 +1,6 @@
 package domain
 
 import (
-	shared "openiam/internal/shared/domain"
-
 	"github.com/alexedwards/argon2id"
 )
 
@@ -12,7 +10,7 @@ type Password struct {
 
 func NewPassword(raw string) (Password, error) {
 	if len(raw) < 8 {
-		return Password{}, shared.ErrPasswordTooShort
+		return Password{}, ErrPasswordTooShort
 	}
 	hash, err := argon2id.CreateHash(raw, argon2id.DefaultParams)
 	if err != nil {

@@ -12,6 +12,7 @@ import (
 	siwe "github.com/spruceid/siwe-go"
 
 	authnDomain "openiam/internal/authn/domain"
+	identityDomain "openiam/internal/identity/domain"
 	shared "openiam/internal/shared/domain"
 )
 
@@ -95,7 +96,7 @@ func (s *SIWEStrategy) Authenticate(ctx context.Context, req *authnDomain.AuthnR
 
 	cred, err := s.credRepo.FindBySubjectAndType(ctx, caip10, req.AppID, authnDomain.CredentialSIWE)
 	if err != nil {
-		if !errors.Is(err, shared.ErrCredentialNotFound) {
+		if !errors.Is(err, authnDomain.ErrCredentialNotFound) {
 			return nil, err
 		}
 		info, createErr := s.externalIDP.EnsureExternalUser(ctx, &authnDomain.EnsureExternalUserRequest{
@@ -122,9 +123,9 @@ func (s *SIWEStrategy) Authenticate(ctx context.Context, req *authnDomain.AuthnR
 
 	switch info.Status {
 	case "disabled":
-		return nil, shared.ErrUserDisabled
+		return nil, identityDomain.ErrUserDisabled
 	case "locked":
-		return nil, shared.ErrUserLocked
+		return nil, identityDomain.ErrUserLocked
 	case "active":
 	default:
 		return nil, shared.ErrUnauthorized
@@ -150,11 +151,11 @@ func (s *SIWEStrategy) VerifyAndBind(ctx context.Context, req *authnDomain.Authn
 	existing, err := s.credRepo.FindBySubjectAndType(ctx, caip10, req.AppID, authnDomain.CredentialSIWE)
 	if err == nil {
 		if existing.UserID != userID {
-			return shared.ErrCredentialAlreadyBound
+			return authnDomain.ErrCredentialAlreadyBound
 		}
-		return shared.ErrCredentialAlreadyExists
+		return authnDomain.ErrCredentialAlreadyExists
 	}
-	if !errors.Is(err, shared.ErrCredentialNotFound) {
+	if !errors.Is(err, authnDomain.ErrCredentialNotFound) {
 		return err
 	}
 
@@ -166,15 +167,15 @@ func (s *SIWEStrategy) VerifyAndBind(ctx context.Context, req *authnDomain.Authn
 func (s *SIWEStrategy) verifySIWE(ctx context.Context, req *authnDomain.AuthnRequest) (string, error) {
 	var p siweLoginParams
 	if err := json.Unmarshal(req.Params, &p); err != nil {
-		return "", shared.ErrInvalidCredential
+		return "", authnDomain.ErrInvalidCredential
 	}
 	if p.Message == "" || p.Signature == "" {
-		return "", shared.ErrInvalidCredential
+		return "", authnDomain.ErrInvalidCredential
 	}
 
 	msg, err := siwe.ParseMessage(p.Message)
 	if err != nil {
-		return "", fmt.Errorf("%w: %v", shared.ErrInvalidCredential, err)
+		return "", fmt.Errorf("%w: %v", authnDomain.ErrInvalidCredential, err)
 	}
 
 	nonce := msg.GetNonce()
@@ -182,22 +183,22 @@ func (s *SIWEStrategy) verifySIWE(ctx context.Context, req *authnDomain.AuthnReq
 
 	raw, err := s.challengeStore.Get(ctx, challengeID)
 	if err != nil {
-		return "", shared.ErrChallengeNotFound
+		return "", authnDomain.ErrChallengeNotFound
 	}
 
 	var cd siweChallengeData
 	if err := json.Unmarshal(raw, &cd); err != nil {
-		return "", shared.ErrChallengeInvalid
+		return "", authnDomain.ErrChallengeInvalid
 	}
 
 	if cd.Nonce != nonce || cd.AppID != string(req.AppID) {
-		return "", shared.ErrChallengeInvalid
+		return "", authnDomain.ErrChallengeInvalid
 	}
 
 	expectedDomain := s.cfg.Domain
 	_, err = msg.Verify(p.Signature, &expectedDomain, &nonce, nil)
 	if err != nil {
-		return "", fmt.Errorf("%w: %v", shared.ErrInvalidCredential, err)
+		return "", fmt.Errorf("%w: %v", authnDomain.ErrInvalidCredential, err)
 	}
 
 	_ = s.challengeStore.Delete(ctx, challengeID)

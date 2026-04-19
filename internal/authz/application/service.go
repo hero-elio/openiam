@@ -35,24 +35,52 @@ type CheckPermissionResult struct {
 	Allowed bool
 }
 
+type ResourcePermissionDTO struct {
+	ID           string
+	UserID       string
+	AppID        string
+	TenantID     string
+	ResourceType string
+	ResourceID   string
+	Action       string
+	GrantedAt    string
+	GrantedBy    string
+}
+
+type PermissionDefinitionDTO struct {
+	ID          string
+	AppID       string
+	Resource    string
+	Action      string
+	Description string
+	IsBuiltin   bool
+	CreatedAt   string
+}
+
 type AuthzAppService struct {
-	roleRepo  domain.RoleRepository
-	enforcer  *domain.Enforcer
-	eventBus  shared.EventBus
-	txManager *persistence.TxManager
+	roleRepo    domain.RoleRepository
+	resPermRepo domain.ResourcePermissionRepository
+	permDefRepo domain.PermissionDefinitionRepository
+	enforcer    *domain.Enforcer
+	eventBus    shared.EventBus
+	txManager   *persistence.TxManager
 }
 
 func NewAuthzAppService(
 	roleRepo domain.RoleRepository,
+	resPermRepo domain.ResourcePermissionRepository,
+	permDefRepo domain.PermissionDefinitionRepository,
 	enforcer *domain.Enforcer,
 	eventBus shared.EventBus,
 	txManager *persistence.TxManager,
 ) *AuthzAppService {
 	return &AuthzAppService{
-		roleRepo:  roleRepo,
-		enforcer:  enforcer,
-		eventBus:  eventBus,
-		txManager: txManager,
+		roleRepo:    roleRepo,
+		resPermRepo: resPermRepo,
+		permDefRepo: permDefRepo,
+		enforcer:    enforcer,
+		eventBus:    eventBus,
+		txManager:   txManager,
 	}
 }
 
@@ -61,11 +89,11 @@ func (s *AuthzAppService) CreateRole(ctx context.Context, cmd *command.CreateRol
 	tenantID := shared.TenantID(cmd.TenantID)
 
 	existing, err := s.roleRepo.FindByName(ctx, appID, cmd.Name)
-	if err != nil && err != shared.ErrRoleNotFound {
+	if err != nil && err != domain.ErrRoleNotFound {
 		return "", err
 	}
 	if existing != nil {
-		return "", shared.ErrRoleAlreadyExists
+		return "", domain.ErrRoleAlreadyExists
 	}
 
 	role := domain.NewRole(appID, tenantID, cmd.Name, cmd.Description)
@@ -80,6 +108,20 @@ func (s *AuthzAppService) CreateRole(ctx context.Context, cmd *command.CreateRol
 	}
 
 	return role.ID, nil
+}
+
+func (s *AuthzAppService) DeleteRole(ctx context.Context, roleID string) error {
+	id := shared.RoleID(roleID)
+	role, err := s.roleRepo.FindByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if role.IsSystem {
+		return domain.ErrRoleNotFound
+	}
+	return s.txManager.Execute(ctx, func(txCtx context.Context) error {
+		return s.roleRepo.Delete(txCtx, id)
+	})
 }
 
 func (s *AuthzAppService) AssignRole(ctx context.Context, cmd *command.AssignRole) error {
@@ -123,12 +165,12 @@ func (s *AuthzAppService) GrantPermission(ctx context.Context, cmd *command.Gran
 	}
 
 	perm := domain.NewPermission(cmd.Resource, cmd.Action)
-	if err := role.GrantPermission(perm); err != nil {
+	if err = role.GrantPermission(perm); err != nil {
 		return err
 	}
 
 	return s.txManager.Execute(ctx, func(txCtx context.Context) error {
-		if err := s.roleRepo.Save(txCtx, role); err != nil {
+		if err = s.roleRepo.Save(txCtx, role); err != nil {
 			return err
 		}
 		return s.eventBus.Publish(txCtx, role.PullEvents()...)
@@ -148,7 +190,17 @@ func (s *AuthzAppService) RevokePermission(ctx context.Context, cmd *command.Rev
 		return err
 	}
 
-	return s.roleRepo.Save(ctx, role)
+	return s.txManager.Execute(ctx, func(txCtx context.Context) error {
+		if err := s.roleRepo.Save(txCtx, role); err != nil {
+			return err
+		}
+		return s.eventBus.Publish(txCtx, domain.PermissionRevokedEvent{
+			RoleID:    roleID,
+			Resource:  cmd.Resource,
+			Action:    cmd.Action,
+			Timestamp: time.Now(),
+		})
+	})
 }
 
 func (s *AuthzAppService) UnassignRole(ctx context.Context, userID, appID, roleID string) error {
@@ -204,6 +256,150 @@ func (s *AuthzAppService) ListUserRoles(ctx context.Context, q *query.ListUserRo
 		})
 	}
 	return dtos, nil
+}
+
+// --- Resource Permission (ACL) methods ---
+
+func (s *AuthzAppService) GrantResourcePermission(ctx context.Context, cmd *command.GrantResourcePermission) error {
+	now := time.Now()
+	rp := &domain.ResourcePermission{
+		UserID:       shared.UserID(cmd.UserID),
+		AppID:        shared.AppID(cmd.AppID),
+		TenantID:     shared.TenantID(cmd.TenantID),
+		ResourceType: cmd.ResourceType,
+		ResourceID:   cmd.ResourceID,
+		Action:       cmd.Action,
+		GrantedAt:    now,
+		GrantedBy:    shared.UserID(cmd.GrantedBy),
+	}
+
+	return s.txManager.Execute(ctx, func(txCtx context.Context) error {
+		if err := s.resPermRepo.Save(txCtx, rp); err != nil {
+			return err
+		}
+		return s.eventBus.Publish(txCtx, domain.ResourcePermissionGrantedEvent{
+			UserID:       rp.UserID,
+			AppID:        rp.AppID,
+			ResourceType: rp.ResourceType,
+			ResourceID:   rp.ResourceID,
+			Action:       rp.Action,
+			GrantedBy:    rp.GrantedBy,
+			Timestamp:    now,
+		})
+	})
+}
+
+func (s *AuthzAppService) RevokeResourcePermission(ctx context.Context, cmd *command.RevokeResourcePermission) error {
+	userID := shared.UserID(cmd.UserID)
+	appID := shared.AppID(cmd.AppID)
+
+	return s.txManager.Execute(ctx, func(txCtx context.Context) error {
+		if err := s.resPermRepo.Delete(txCtx, userID, appID, cmd.ResourceType, cmd.ResourceID, cmd.Action); err != nil {
+			return err
+		}
+		return s.eventBus.Publish(txCtx, domain.ResourcePermissionRevokedEvent{
+			UserID:       userID,
+			AppID:        appID,
+			ResourceType: cmd.ResourceType,
+			ResourceID:   cmd.ResourceID,
+			Action:       cmd.Action,
+			Timestamp:    time.Now(),
+		})
+	})
+}
+
+func (s *AuthzAppService) CheckResourcePermission(ctx context.Context, q *query.CheckResourcePermission) (*CheckPermissionResult, error) {
+	allowed, err := s.enforcer.IsResourceAllowed(
+		ctx,
+		shared.UserID(q.UserID),
+		shared.AppID(q.AppID),
+		q.ResourceType,
+		q.ResourceID,
+		q.Action,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &CheckPermissionResult{Allowed: allowed}, nil
+}
+
+func (s *AuthzAppService) ListResourcePermissions(ctx context.Context, q *query.ListResourcePermissions) ([]*ResourcePermissionDTO, error) {
+	perms, err := s.resPermRepo.ListByUser(ctx, shared.UserID(q.UserID), shared.AppID(q.AppID))
+	if err != nil {
+		return nil, err
+	}
+
+	dtos := make([]*ResourcePermissionDTO, 0, len(perms))
+	for _, p := range perms {
+		dtos = append(dtos, &ResourcePermissionDTO{
+			ID:           p.ID,
+			UserID:       p.UserID.String(),
+			AppID:        p.AppID.String(),
+			TenantID:     p.TenantID.String(),
+			ResourceType: p.ResourceType,
+			ResourceID:   p.ResourceID,
+			Action:       p.Action,
+			GrantedAt:    p.GrantedAt.Format(time.RFC3339),
+			GrantedBy:    p.GrantedBy.String(),
+		})
+	}
+	return dtos, nil
+}
+
+// --- Permission Definition (registry) methods ---
+
+func (s *AuthzAppService) RegisterPermission(ctx context.Context, cmd *command.RegisterPermission) error {
+	pd := &domain.PermissionDefinition{
+		AppID:       shared.AppID(cmd.AppID),
+		Resource:    cmd.Resource,
+		Action:      cmd.Action,
+		Description: cmd.Description,
+		IsBuiltin:   false,
+		CreatedAt:   time.Now(),
+	}
+	return s.permDefRepo.Upsert(ctx, pd)
+}
+
+func (s *AuthzAppService) DeletePermissionDefinition(ctx context.Context, cmd *command.DeletePermission) error {
+	return s.permDefRepo.Delete(ctx, shared.AppID(cmd.AppID), cmd.Resource, cmd.Action)
+}
+
+func (s *AuthzAppService) ListPermissionDefinitions(ctx context.Context, q *query.ListPermissionDefinitions) ([]*PermissionDefinitionDTO, error) {
+	defs, err := s.permDefRepo.ListByApp(ctx, shared.AppID(q.AppID))
+	if err != nil {
+		return nil, err
+	}
+
+	dtos := make([]*PermissionDefinitionDTO, 0, len(defs))
+	for _, d := range defs {
+		dtos = append(dtos, &PermissionDefinitionDTO{
+			ID:          d.ID,
+			AppID:       d.AppID.String(),
+			Resource:    d.Resource,
+			Action:      d.Action,
+			Description: d.Description,
+			IsBuiltin:   d.IsBuiltin,
+			CreatedAt:   d.CreatedAt.Format(time.RFC3339),
+		})
+	}
+	return dtos, nil
+}
+
+func (s *AuthzAppService) SyncBuiltinPermissions(ctx context.Context, appID shared.AppID) error {
+	for _, bp := range domain.BuiltinPermissions {
+		pd := &domain.PermissionDefinition{
+			AppID:       appID,
+			Resource:    bp.Resource,
+			Action:      bp.Action,
+			Description: bp.Description,
+			IsBuiltin:   true,
+			CreatedAt:   time.Now(),
+		}
+		if err := s.permDefRepo.Upsert(ctx, pd); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func toRoleDTO(r *domain.Role) *RoleDTO {

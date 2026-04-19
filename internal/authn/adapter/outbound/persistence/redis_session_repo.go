@@ -47,7 +47,7 @@ func (r *RedisSessionRepo) Save(ctx context.Context, session *domain.Session) er
 	}
 	ttl := time.Until(session.ExpiresAt)
 	if ttl <= 0 {
-		return shared.ErrSessionExpired
+		return domain.ErrSessionExpired
 	}
 
 	pipe := r.rdb.Pipeline()
@@ -63,7 +63,7 @@ func (r *RedisSessionRepo) FindByID(ctx context.Context, id shared.SessionID) (*
 	data, err := r.rdb.Get(ctx, prefixSessionData+id.String()).Bytes()
 	if err != nil {
 		if err == redis.Nil {
-			return nil, shared.ErrSessionNotFound
+			return nil, domain.ErrSessionNotFound
 		}
 		return nil, err
 	}
@@ -74,7 +74,7 @@ func (r *RedisSessionRepo) FindByRefreshToken(ctx context.Context, refreshToken 
 	sessionID, err := r.rdb.Get(ctx, prefixSessionRefresh+refreshToken).Result()
 	if err != nil {
 		if err == redis.Nil {
-			return nil, shared.ErrSessionNotFound
+			return nil, domain.ErrSessionNotFound
 		}
 		return nil, err
 	}
@@ -85,7 +85,7 @@ func (r *RedisSessionRepo) Update(ctx context.Context, session *domain.Session) 
 	oldData, err := r.rdb.Get(ctx, prefixSessionData+session.ID.String()).Bytes()
 	if err != nil {
 		if err == redis.Nil {
-			return shared.ErrSessionNotFound
+			return domain.ErrSessionNotFound
 		}
 		return err
 	}
@@ -101,7 +101,7 @@ func (r *RedisSessionRepo) Update(ctx context.Context, session *domain.Session) 
 	}
 	ttl := time.Until(session.ExpiresAt)
 	if ttl <= 0 {
-		return shared.ErrSessionExpired
+		return domain.ErrSessionExpired
 	}
 
 	pipe := r.rdb.Pipeline()

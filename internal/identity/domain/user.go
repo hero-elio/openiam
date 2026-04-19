@@ -85,7 +85,7 @@ func NewExternalUser(tenantID shared.TenantID, appID shared.AppID, provider, cre
 
 func (u *User) Activate() error {
 	if u.Status != UserStatusPending {
-		return shared.ErrUserAlreadyActivated
+		return ErrUserAlreadyActivated
 	}
 	u.Status = UserStatusActive
 	u.UpdatedAt = time.Now()
@@ -95,7 +95,7 @@ func (u *User) Activate() error {
 
 func (u *User) ChangePassword(oldRaw, newRaw string) error {
 	if !u.Password.Verify(oldRaw) {
-		return shared.ErrInvalidPassword
+		return ErrInvalidPassword
 	}
 	newPwd, err := NewPassword(newRaw)
 	if err != nil {

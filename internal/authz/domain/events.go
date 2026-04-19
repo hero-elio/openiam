@@ -7,9 +7,12 @@ import (
 )
 
 const (
-	EventRoleCreated       = "role.created"
-	EventPermissionGranted = "role.permission_granted"
-	EventRoleAssigned      = "role.assigned"
+	EventRoleCreated               = "role.created"
+	EventPermissionGranted         = "role.permission_granted"
+	EventPermissionRevoked         = "role.permission_revoked"
+	EventRoleAssigned              = "role.assigned"
+	EventResourcePermissionGranted = "resource_permission.granted"
+	EventResourcePermissionRevoked = "resource_permission.revoked"
 )
 
 type RoleCreatedEvent struct {
@@ -46,3 +49,41 @@ type RoleAssignedEvent struct {
 func (e RoleAssignedEvent) EventName() string     { return EventRoleAssigned }
 func (e RoleAssignedEvent) OccurredAt() time.Time { return e.Timestamp }
 func (e RoleAssignedEvent) AggregateID() string   { return e.RoleID.String() }
+
+type PermissionRevokedEvent struct {
+	RoleID    shared.RoleID
+	Resource  string
+	Action    string
+	Timestamp time.Time
+}
+
+func (e PermissionRevokedEvent) EventName() string     { return EventPermissionRevoked }
+func (e PermissionRevokedEvent) OccurredAt() time.Time { return e.Timestamp }
+func (e PermissionRevokedEvent) AggregateID() string   { return e.RoleID.String() }
+
+type ResourcePermissionGrantedEvent struct {
+	UserID       shared.UserID
+	AppID        shared.AppID
+	ResourceType string
+	ResourceID   string
+	Action       string
+	GrantedBy    shared.UserID
+	Timestamp    time.Time
+}
+
+func (e ResourcePermissionGrantedEvent) EventName() string     { return EventResourcePermissionGranted }
+func (e ResourcePermissionGrantedEvent) OccurredAt() time.Time { return e.Timestamp }
+func (e ResourcePermissionGrantedEvent) AggregateID() string   { return e.UserID.String() }
+
+type ResourcePermissionRevokedEvent struct {
+	UserID       shared.UserID
+	AppID        shared.AppID
+	ResourceType string
+	ResourceID   string
+	Action       string
+	Timestamp    time.Time
+}
+
+func (e ResourcePermissionRevokedEvent) EventName() string     { return EventResourcePermissionRevoked }
+func (e ResourcePermissionRevokedEvent) OccurredAt() time.Time { return e.Timestamp }
+func (e ResourcePermissionRevokedEvent) AggregateID() string   { return e.UserID.String() }

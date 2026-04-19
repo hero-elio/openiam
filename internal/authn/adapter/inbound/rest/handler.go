@@ -1,7 +1,6 @@
 package rest
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -14,16 +13,8 @@ import (
 	"openiam/internal/authn/application"
 	"openiam/internal/authn/application/command"
 	"openiam/internal/authn/domain"
-	shared "openiam/internal/shared/domain"
-)
-
-type contextKey string
-
-const (
-	ctxUserID    contextKey = "user_id"
-	ctxSessionID contextKey = "session_id"
-	ctxTenantID  contextKey = "tenant_id"
-	ctxAppID     contextKey = "app_id"
+	identityDomain "openiam/internal/identity/domain"
+	sharedAuth "openiam/internal/shared/auth"
 )
 
 type Handler struct {
@@ -61,15 +52,18 @@ func (h *Handler) AuthMiddleware(next http.Handler) http.Handler {
 			writeError(w, http.StatusUnauthorized, "unauthorized", "missing bearer token")
 			return
 		}
-		claims, err := h.tokenProvider.Validate(raw)
+		tc, err := h.tokenProvider.Validate(raw)
 		if err != nil {
 			writeError(w, http.StatusUnauthorized, "unauthorized", "invalid token")
 			return
 		}
-		ctx := context.WithValue(r.Context(), ctxUserID, claims.UserID)
-		ctx = context.WithValue(ctx, ctxSessionID, claims.SessionID)
-		ctx = context.WithValue(ctx, ctxTenantID, claims.TenantID)
-		ctx = context.WithValue(ctx, ctxAppID, claims.AppID)
+		ctx := sharedAuth.ContextWithClaims(r.Context(), sharedAuth.Claims{
+			UserID:    tc.UserID,
+			TenantID:  tc.TenantID,
+			AppID:     tc.AppID,
+			SessionID: tc.SessionID,
+			Roles:     tc.Roles,
+		})
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
@@ -179,8 +173,9 @@ func (h *Handler) handleChallenge(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleBindCredential(w http.ResponseWriter, r *http.Request) {
-	userID, _ := r.Context().Value(ctxUserID).(string)
-	appID, _ := r.Context().Value(ctxAppID).(string)
+	claims, _ := sharedAuth.ClaimsFromContext(r.Context())
+	userID := claims.UserID
+	appID := claims.AppID
 
 	var req BindCredentialRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -207,8 +202,9 @@ func (h *Handler) handleBindCredential(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleLogout(w http.ResponseWriter, r *http.Request) {
-	userID, _ := r.Context().Value(ctxUserID).(string)
-	sessionID, _ := r.Context().Value(ctxSessionID).(string)
+	claims, _ := sharedAuth.ClaimsFromContext(r.Context())
+	userID := claims.UserID
+	sessionID := claims.SessionID
 
 	if err := h.svc.Logout(r.Context(), &command.Logout{
 		SessionID: sessionID,
@@ -252,7 +248,8 @@ func (h *Handler) handleRefreshToken(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleListSessions(w http.ResponseWriter, r *http.Request) {
-	userID, _ := r.Context().Value(ctxUserID).(string)
+	claims, _ := sharedAuth.ClaimsFromContext(r.Context())
+	userID := claims.UserID
 
 	sessions, err := h.svc.ListSessions(r.Context(), userID)
 	if err != nil {
@@ -279,7 +276,8 @@ func (h *Handler) handleListSessions(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleRevokeSession(w http.ResponseWriter, r *http.Request) {
-	userID, _ := r.Context().Value(ctxUserID).(string)
+	claims, _ := sharedAuth.ClaimsFromContext(r.Context())
+	userID := claims.UserID
 	sessionID := chi.URLParam(r, "id")
 
 	if err := h.svc.Logout(r.Context(), &command.Logout{
@@ -305,37 +303,37 @@ func writeError(w http.ResponseWriter, status int, code, message string) {
 
 func writeBusinessError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, shared.ErrInvalidCredential), errors.Is(err, shared.ErrInvalidPassword):
+	case errors.Is(err, domain.ErrInvalidCredential), errors.Is(err, identityDomain.ErrInvalidPassword):
 		writeError(w, http.StatusUnauthorized, "invalid_credentials", "invalid credentials")
-	case errors.Is(err, shared.ErrCredentialNotFound):
+	case errors.Is(err, domain.ErrCredentialNotFound):
 		writeError(w, http.StatusNotFound, "credential_not_found", "credential not found, registration required")
-	case errors.Is(err, shared.ErrUserNotFound):
+	case errors.Is(err, identityDomain.ErrUserNotFound):
 		writeError(w, http.StatusUnauthorized, "invalid_credentials", "invalid credentials")
-	case errors.Is(err, shared.ErrEmailAlreadyTaken):
+	case errors.Is(err, identityDomain.ErrEmailAlreadyTaken):
 		writeError(w, http.StatusConflict, "email_taken", "email is already registered")
-	case errors.Is(err, shared.ErrPasswordTooShort):
+	case errors.Is(err, identityDomain.ErrPasswordTooShort):
 		writeError(w, http.StatusBadRequest, "password_too_short", "password must be at least 8 characters")
-	case errors.Is(err, shared.ErrUserDisabled):
+	case errors.Is(err, identityDomain.ErrUserDisabled):
 		writeError(w, http.StatusForbidden, "user_disabled", "account is disabled")
-	case errors.Is(err, shared.ErrUserLocked):
+	case errors.Is(err, identityDomain.ErrUserLocked):
 		writeError(w, http.StatusForbidden, "user_locked", "account is locked")
-	case errors.Is(err, shared.ErrSessionNotFound):
+	case errors.Is(err, domain.ErrSessionNotFound):
 		writeError(w, http.StatusUnauthorized, "session_not_found", "session not found")
-	case errors.Is(err, shared.ErrSessionExpired):
+	case errors.Is(err, domain.ErrSessionExpired):
 		writeError(w, http.StatusUnauthorized, "session_expired", "session has expired")
-	case errors.Is(err, shared.ErrUnsupportedProvider):
+	case errors.Is(err, domain.ErrUnsupportedProvider):
 		writeError(w, http.StatusBadRequest, "unsupported_provider", "unsupported authentication provider")
-	case errors.Is(err, shared.ErrChallengeNotSupported):
+	case errors.Is(err, domain.ErrChallengeNotSupported):
 		writeError(w, http.StatusBadRequest, "challenge_not_supported", "this provider does not support challenge flow")
-	case errors.Is(err, shared.ErrChallengeNotFound):
+	case errors.Is(err, domain.ErrChallengeNotFound):
 		writeError(w, http.StatusBadRequest, "challenge_expired", "challenge not found or expired")
-	case errors.Is(err, shared.ErrChallengeInvalid):
+	case errors.Is(err, domain.ErrChallengeInvalid):
 		writeError(w, http.StatusBadRequest, "challenge_invalid", "invalid challenge response")
-	case errors.Is(err, shared.ErrCredentialAlreadyBound):
+	case errors.Is(err, domain.ErrCredentialAlreadyBound):
 		writeError(w, http.StatusConflict, "credential_already_bound", "credential is already bound to another user")
-	case errors.Is(err, shared.ErrCredentialAlreadyExists):
+	case errors.Is(err, domain.ErrCredentialAlreadyExists):
 		writeError(w, http.StatusConflict, "credential_already_exists", "credential is already bound to this user")
-	case errors.Is(err, shared.ErrInvalidToken), errors.Is(err, shared.ErrTokenExpired):
+	case errors.Is(err, domain.ErrInvalidToken), errors.Is(err, domain.ErrTokenExpired):
 		writeError(w, http.StatusUnauthorized, "invalid_token", "token is invalid or expired")
 	default:
 		writeError(w, http.StatusInternalServerError, "internal_error", "an internal error occurred")

@@ -7,6 +7,7 @@ import (
 	"github.com/alexedwards/argon2id"
 
 	"openiam/internal/authn/domain"
+	identityDomain "openiam/internal/identity/domain"
 	shared "openiam/internal/shared/domain"
 )
 
@@ -34,10 +35,10 @@ func (s *PasswordStrategy) Type() domain.CredentialType {
 func (s *PasswordStrategy) Authenticate(ctx context.Context, req *domain.AuthnRequest) (*domain.AuthnResult, error) {
 	var p passwordParams
 	if err := json.Unmarshal(req.Params, &p); err != nil {
-		return nil, shared.ErrInvalidCredential
+		return nil, domain.ErrInvalidCredential
 	}
 	if p.Email == "" || p.Password == "" {
-		return nil, shared.ErrInvalidCredential
+		return nil, domain.ErrInvalidCredential
 	}
 
 	cred, err := s.credRepo.FindBySubjectAndType(ctx, p.Email, req.AppID, domain.CredentialPassword)
@@ -46,7 +47,7 @@ func (s *PasswordStrategy) Authenticate(ctx context.Context, req *domain.AuthnRe
 	}
 
 	if cred.Secret == nil {
-		return nil, shared.ErrInvalidCredential
+		return nil, domain.ErrInvalidCredential
 	}
 
 	match, err := argon2id.ComparePasswordAndHash(p.Password, *cred.Secret)
@@ -54,7 +55,7 @@ func (s *PasswordStrategy) Authenticate(ctx context.Context, req *domain.AuthnRe
 		return nil, err
 	}
 	if !match {
-		return nil, shared.ErrInvalidPassword
+		return nil, identityDomain.ErrInvalidPassword
 	}
 
 	info, err := s.userProvider.GetUserInfo(ctx, cred.UserID)
@@ -64,9 +65,9 @@ func (s *PasswordStrategy) Authenticate(ctx context.Context, req *domain.AuthnRe
 
 	switch info.Status {
 	case "disabled":
-		return nil, shared.ErrUserDisabled
+		return nil, identityDomain.ErrUserDisabled
 	case "locked":
-		return nil, shared.ErrUserLocked
+		return nil, identityDomain.ErrUserLocked
 	case "active":
 	default:
 		return nil, shared.ErrUnauthorized

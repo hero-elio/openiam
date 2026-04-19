@@ -70,7 +70,7 @@ func NewAuthnAppService(
 func (s *AuthnAppService) Login(ctx context.Context, cmd *command.Login) (*domain.TokenPair, error) {
 	strategy, ok := s.strategies[domain.CredentialType(cmd.Provider)]
 	if !ok {
-		return nil, shared.ErrUnsupportedProvider
+		return nil, domain.ErrUnsupportedProvider
 	}
 
 	result, err := strategy.Authenticate(ctx, &domain.AuthnRequest{
@@ -131,12 +131,12 @@ func (s *AuthnAppService) Login(ctx context.Context, cmd *command.Login) (*domai
 func (s *AuthnAppService) BeginChallenge(ctx context.Context, cmd *command.Challenge) (*domain.ChallengeResponse, error) {
 	strategy, ok := s.strategies[domain.CredentialType(cmd.Provider)]
 	if !ok {
-		return nil, shared.ErrUnsupportedProvider
+		return nil, domain.ErrUnsupportedProvider
 	}
 
 	challengeable, ok := strategy.(domain.ChallengeableStrategy)
 	if !ok {
-		return nil, shared.ErrChallengeNotSupported
+		return nil, domain.ErrChallengeNotSupported
 	}
 
 	return challengeable.Challenge(ctx, &domain.ChallengeRequest{
@@ -175,7 +175,7 @@ func (s *AuthnAppService) RefreshToken(ctx context.Context, cmd *command.Refresh
 
 	if session.IsExpired() {
 		_ = s.sessionRepo.Delete(ctx, session.ID)
-		return nil, shared.ErrSessionExpired
+		return nil, domain.ErrSessionExpired
 	}
 
 	claims := domain.TokenClaims{
@@ -226,7 +226,7 @@ func (s *AuthnAppService) ListSessions(ctx context.Context, userID string) ([]*S
 func (s *AuthnAppService) BindCredential(ctx context.Context, cmd *command.BindCredential) error {
 	strategy, ok := s.strategies[domain.CredentialType(cmd.Provider)]
 	if !ok {
-		return shared.ErrUnsupportedProvider
+		return domain.ErrUnsupportedProvider
 	}
 
 	bindable, ok := strategy.(domain.BindableStrategy)

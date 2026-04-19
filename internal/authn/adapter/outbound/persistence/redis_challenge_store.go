@@ -6,7 +6,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
-	shared "openiam/internal/shared/domain"
+	"openiam/internal/authn/domain"
 )
 
 const prefixChallenge = "challenge:"
@@ -27,7 +27,7 @@ func (s *RedisChallengeStore) Get(ctx context.Context, challengeID string) ([]by
 	data, err := s.rdb.Get(ctx, prefixChallenge+challengeID).Bytes()
 	if err != nil {
 		if err == redis.Nil {
-			return nil, shared.ErrChallengeNotFound
+			return nil, domain.ErrChallengeNotFound
 		}
 		return nil, err
 	}

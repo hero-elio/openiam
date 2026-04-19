@@ -70,7 +70,7 @@ func (r *PostgresCredentialRepo) FindByID(ctx context.Context, id shared.Credent
 		`SELECT `+credentialColumns+` FROM credentials WHERE id = $1`, id.String())
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, shared.ErrCredentialNotFound
+			return nil, domain.ErrCredentialNotFound
 		}
 		return nil, err
 	}
@@ -85,7 +85,7 @@ func (r *PostgresCredentialRepo) FindByUserAndType(ctx context.Context, userID s
 		userID.String(), appID.String(), string(credType))
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, shared.ErrCredentialNotFound
+			return nil, domain.ErrCredentialNotFound
 		}
 		return nil, err
 	}
@@ -100,7 +100,7 @@ func (r *PostgresCredentialRepo) FindBySubjectAndType(ctx context.Context, subje
 		subject, appID.String(), string(credType))
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, shared.ErrCredentialNotFound
+			return nil, domain.ErrCredentialNotFound
 		}
 		return nil, err
 	}

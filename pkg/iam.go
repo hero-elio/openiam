@@ -29,9 +29,15 @@ import (
 	identityPersistence "openiam/internal/identity/adapter/outbound/persistence"
 	identityApp "openiam/internal/identity/application"
 
+	tenantRest "openiam/internal/tenant/adapter/inbound/rest"
+	tenantPersistence "openiam/internal/tenant/adapter/outbound/persistence"
+	tenantApp "openiam/internal/tenant/application"
+
 	shared "openiam/internal/shared/domain"
 	"openiam/internal/shared/infra/eventbus"
 	"openiam/internal/shared/infra/persistence"
+
+	mw "openiam/pkg/middleware"
 )
 
 type Config struct {
@@ -62,6 +68,7 @@ type Engine struct {
 	Identity *identityApp.IdentityService
 	Authn    *authnApp.AuthnAppService
 	Authz    *authzApp.AuthzAppService
+	Tenant   *tenantApp.TenantAppService
 	EventBus shared.EventBus
 
 	router chi.Router
@@ -162,16 +169,23 @@ func New(cfg Config, logger *slog.Logger) (*Engine, error) {
 
 	// --- Authz ---
 	roleRepo := authzPersistence.NewPostgresRoleRepository(db)
-	enforcer := authzDomain.NewEnforcer(roleRepo)
-	authzSvc := authzApp.NewAuthzAppService(roleRepo, enforcer, bus, txMgr)
+	resPermRepo := authzPersistence.NewPostgresResourcePermissionRepository(db)
+	permDefRepo := authzPersistence.NewPostgresPermissionDefinitionRepository(db)
+	enforcer := authzDomain.NewEnforcer(roleRepo, resPermRepo)
+	authzSvc := authzApp.NewAuthzAppService(roleRepo, resPermRepo, permDefRepo, enforcer, bus, txMgr)
 	authzHandler := authzRest.NewHandler(authzSvc)
 
-	authzSub := authzEvent.NewSubscriber(roleRepo, bus)
+	authzSub := authzEvent.NewSubscriber(roleRepo, permDefRepo, bus)
 	if err = authzSub.Register(); err != nil {
 		_ = db.Close()
 		_ = rdb.Close()
 		return nil, fmt.Errorf("register authz event subscriber: %w", err)
 	}
+
+	// --- Tenant ---
+	tenantRepo := tenantPersistence.NewPostgresTenantRepository(db)
+	tenantSvc := tenantApp.NewTenantAppService(tenantRepo, bus, txMgr)
+	tenantHandler := tenantRest.NewHandler(tenantSvc)
 
 	// --- Router ---
 	r := chi.NewRouter()
@@ -183,15 +197,22 @@ func New(cfg Config, logger *slog.Logger) (*Engine, error) {
 	r.Mount("/__test/authn", http.StripPrefix("/__test/authn", testAuthnPageHandler()))
 
 	r.Route("/api/v1", func(api chi.Router) {
-		api.Mount("/users", identityHandler.Routes())
 		api.Mount("/auth", authnHandler.Routes())
-		api.Mount("/authz", authzHandler.Routes())
+
+		api.Group(func(protected chi.Router) {
+			protected.Use(mw.BearerAuth(jwtProvider))
+			protected.Mount("/tenants", tenantHandler.TenantRoutes())
+			protected.Mount("/applications", tenantHandler.ApplicationRoutes())
+			protected.Mount("/users", identityHandler.Routes())
+			protected.Mount("/authz", authzHandler.Routes())
+		})
 	})
 
 	return &Engine{
 		Identity: identitySvc,
 		Authn:    authnSvc,
 		Authz:    authzSvc,
+		Tenant:   tenantSvc,
 		EventBus: bus,
 		router:   r,
 		db:       db,

@@ -8,10 +8,9 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
+	"openiam/internal/authz/domain"
 	shared "openiam/internal/shared/domain"
 	sharedPersistence "openiam/internal/shared/infra/persistence"
-
-	"openiam/internal/authz/domain"
 )
 
 type roleRow struct {
@@ -96,7 +95,7 @@ func (r *PostgresRoleRepository) FindByID(ctx context.Context, id shared.RoleID)
 	err := sqlx.GetContext(ctx, conn, &row, `SELECT * FROM roles WHERE id = $1`, id.String())
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, shared.ErrRoleNotFound
+			return nil, domain.ErrRoleNotFound
 		}
 		return nil, err
 	}
@@ -118,7 +117,7 @@ func (r *PostgresRoleRepository) FindByName(ctx context.Context, appID shared.Ap
 		appID.String(), name)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, shared.ErrRoleNotFound
+			return nil, domain.ErrRoleNotFound
 		}
 		return nil, err
 	}

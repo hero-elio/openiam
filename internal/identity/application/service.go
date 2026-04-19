@@ -48,7 +48,7 @@ func (s *IdentityService) RegisterUser(ctx context.Context, cmd *command.Registe
 		return "", err
 	}
 	if exists {
-		return "", shared.ErrEmailAlreadyTaken
+		return "", domain.ErrEmailAlreadyTaken
 	}
 
 	provider := cmd.Provider

@@ -68,7 +68,7 @@ func (r *PostgresUserRepository) FindByID(ctx context.Context, id shared.UserID)
 	err := sqlx.GetContext(ctx, conn, &row, `SELECT * FROM users WHERE id = $1`, id.String())
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, shared.ErrUserNotFound
+			return nil, domain.ErrUserNotFound
 		}
 		return nil, err
 	}
@@ -84,7 +84,7 @@ func (r *PostgresUserRepository) FindByEmail(ctx context.Context, tenantID share
 		tenantID.String(), email.String())
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, shared.ErrUserNotFound
+			return nil, domain.ErrUserNotFound
 		}
 		return nil, err
 	}

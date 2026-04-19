@@ -38,9 +38,22 @@ func NewRole(appID shared.AppID, tenantID shared.TenantID, name, description str
 	return r
 }
 
+func NewSystemRole(appID shared.AppID, tenantID shared.TenantID, name, description string) *Role {
+	now := time.Now()
+	return &Role{
+		ID:          shared.NewRoleID(),
+		AppID:       appID,
+		TenantID:    tenantID,
+		Name:        name,
+		Description: description,
+		IsSystem:    true,
+		CreatedAt:   now,
+	}
+}
+
 func (r *Role) GrantPermission(p Permission) error {
 	if r.HasPermission(p) {
-		return shared.ErrPermissionAlreadyGranted
+		return ErrPermissionAlreadyGranted
 	}
 	r.Permissions = append(r.Permissions, p)
 	r.RecordEvent(PermissionGrantedEvent{

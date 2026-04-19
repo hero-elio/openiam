@@ -3,8 +3,6 @@ package domain
 import (
 	"net/mail"
 	"strings"
-
-	shared "openiam/internal/shared/domain"
 )
 
 type Email struct {
@@ -15,7 +13,7 @@ func NewEmail(raw string) (Email, error) {
 	trimmed := strings.TrimSpace(raw)
 	addr, err := mail.ParseAddress(trimmed)
 	if err != nil {
-		return Email{}, shared.ErrInvalidEmail
+		return Email{}, ErrInvalidEmail
 	}
 	return Email{value: strings.ToLower(addr.Address)}, nil
 }
