@@ -86,10 +86,20 @@ type UserRegistrar interface {
 // (e.g. CAIP-10 address for SIWE, base64url credential ID for WebAuthn)
 // and returns the new user's identity. Called during first-time external login.
 type ExternalIdentityProvider interface {
-	EnsureExternalUser(ctx context.Context, req *EnsureExternalUserRequest) (*UserInfo, error)
+	ProvisionExternalUser(ctx context.Context, req *ProvisionExternalUserRequest) (*UserInfo, error)
 }
 
-type EnsureExternalUserRequest struct {
+// ExternalLoginIdentity is the identity port for SIWE/WebAuthn: resolve users by
+// ID and provision local users on first login from an external subject.
+// Simpler strategies (password, SMS) only need UserInfoProvider.
+type ExternalLoginIdentity interface {
+	UserInfoProvider
+	ExternalIdentityProvider
+}
+
+// ProvisionExternalUserRequest carries the external subject and tenant context
+// needed to create (or look up) the local user on first login.
+type ProvisionExternalUserRequest struct {
 	AppID             shared.AppID
 	TenantID          shared.TenantID
 	Provider          string

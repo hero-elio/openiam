@@ -6,7 +6,6 @@ import (
 	"time"
 
 	shared "openiam/internal/shared/domain"
-	"openiam/internal/shared/infra/persistence"
 
 	"openiam/internal/authz/domain"
 )
@@ -31,14 +30,14 @@ type Subscriber struct {
 	roleRepo    domain.RoleRepository
 	permDefRepo domain.PermissionDefinitionRepository
 	eventBus    shared.EventBus
-	txManager   *persistence.TxManager
+	txManager   shared.TxManager
 }
 
 func NewSubscriber(
 	roleRepo domain.RoleRepository,
 	permDefRepo domain.PermissionDefinitionRepository,
 	eventBus shared.EventBus,
-	txManager *persistence.TxManager,
+	txManager shared.TxManager,
 ) *Subscriber {
 	return &Subscriber{
 		roleRepo:    roleRepo,

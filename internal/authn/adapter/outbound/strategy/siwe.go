@@ -35,17 +35,15 @@ type siweChallengeData struct {
 type SIWEStrategy struct {
 	cfg            SIWEConfig
 	credRepo       authnDomain.CredentialRepository
-	userProvider   authnDomain.UserInfoProvider
-	externalIDP    authnDomain.ExternalIdentityProvider
+	identity       authnDomain.ExternalLoginIdentity
 	challengeStore authnDomain.ChallengeStore
 }
 
-func NewSIWEStrategy(cfg SIWEConfig, credRepo authnDomain.CredentialRepository, userProvider authnDomain.UserInfoProvider, externalIDP authnDomain.ExternalIdentityProvider, store authnDomain.ChallengeStore) *SIWEStrategy {
+func NewSIWEStrategy(cfg SIWEConfig, credRepo authnDomain.CredentialRepository, identity authnDomain.ExternalLoginIdentity, store authnDomain.ChallengeStore) *SIWEStrategy {
 	return &SIWEStrategy{
 		cfg:            cfg,
 		credRepo:       credRepo,
-		userProvider:   userProvider,
-		externalIDP:    externalIDP,
+		identity:       identity,
 		challengeStore: store,
 	}
 }
@@ -99,7 +97,7 @@ func (s *SIWEStrategy) Authenticate(ctx context.Context, req *authnDomain.AuthnR
 		if !errors.Is(err, authnDomain.ErrCredentialNotFound) {
 			return nil, err
 		}
-		info, createErr := s.externalIDP.EnsureExternalUser(ctx, &authnDomain.EnsureExternalUserRequest{
+		info, createErr := s.identity.ProvisionExternalUser(ctx, &authnDomain.ProvisionExternalUserRequest{
 			AppID:             req.AppID,
 			TenantID:          "default",
 			Provider:          string(authnDomain.CredentialSIWE),
@@ -116,7 +114,7 @@ func (s *SIWEStrategy) Authenticate(ctx context.Context, req *authnDomain.AuthnR
 		}, nil
 	}
 
-	info, err := s.userProvider.GetUserInfo(ctx, cred.UserID)
+	info, err := s.identity.GetUserInfo(ctx, cred.UserID)
 	if err != nil {
 		return nil, err
 	}

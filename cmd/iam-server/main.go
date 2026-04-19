@@ -14,6 +14,8 @@ import (
 	"github.com/spf13/viper"
 
 	iam "openiam/pkg"
+
+	"openiam/internal/authn"
 )
 
 func main() {
@@ -60,36 +62,30 @@ func main() {
 		logger.Error("invalid jwt.access_ttl", "error", err)
 		os.Exit(1)
 	}
-	refreshTTL, err := time.ParseDuration(v.GetString("jwt.refresh_ttl"))
-	if err != nil {
-		logger.Error("invalid jwt.refresh_ttl", "error", err)
-		os.Exit(1)
-	}
 	sessionTTL, err := time.ParseDuration(v.GetString("session.ttl"))
 	if err != nil {
 		logger.Error("invalid session.ttl", "error", err)
 		os.Exit(1)
 	}
 
-	cfg := iam.Config{
-		DatabaseDSN:     v.GetString("database.dsn"),
-		RedisAddr:       v.GetString("redis.addr"),
-		RedisPassword:   v.GetString("redis.password"),
-		RedisDB:         v.GetInt("redis.db"),
-		JWTSecret:       v.GetString("jwt.secret"),
-		JWTIssuer:       v.GetString("jwt.issuer"),
-		AccessTokenTTL:  accessTTL,
-		RefreshTokenTTL: refreshTTL,
-		SessionTTL:      sessionTTL,
-		SIWEDomain:      v.GetString("siwe.domain"),
-		WebAuthnRPID:    v.GetString("webauthn.rp_id"),
-		WebAuthnRPName:  v.GetString("webauthn.rp_name"),
-		WebAuthnRPOrigins: splitAndTrim(
-			v.GetString("webauthn.rp_origins"),
-		),
-	}
-
-	engine, err := iam.New(cfg, logger)
+	engine, err := iam.New(
+		iam.WithLogger(logger),
+		iam.WithPostgres(v.GetString("database.dsn")),
+		iam.WithRedis(v.GetString("redis.addr"), v.GetString("redis.password"), v.GetInt("redis.db")),
+		iam.WithIdentity(),
+		iam.WithAuthn(authn.Config{
+			JWTSecret:         v.GetString("jwt.secret"),
+			JWTIssuer:         v.GetString("jwt.issuer"),
+			AccessTokenTTL:    accessTTL,
+			SessionTTL:        sessionTTL,
+			SIWEDomain:        v.GetString("siwe.domain"),
+			WebAuthnRPID:      v.GetString("webauthn.rp_id"),
+			WebAuthnRPName:    v.GetString("webauthn.rp_name"),
+			WebAuthnRPOrigins: splitAndTrim(v.GetString("webauthn.rp_origins")),
+		}),
+		iam.WithAuthz(),
+		iam.WithTenant(),
+	)
 	if err != nil {
 		logger.Error("failed to initialize engine", "error", err)
 		os.Exit(1)

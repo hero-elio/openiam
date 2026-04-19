@@ -8,257 +8,260 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
+	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/jmoiron/sqlx"
 	"github.com/redis/go-redis/v9"
 
-	authnEvent "openiam/internal/authn/adapter/inbound/event"
-	authnRest "openiam/internal/authn/adapter/inbound/rest"
+	"openiam/internal/authn"
 	authnPersistence "openiam/internal/authn/adapter/outbound/persistence"
-	authnStrategy "openiam/internal/authn/adapter/outbound/strategy"
 	authnToken "openiam/internal/authn/adapter/outbound/token"
-	authnApp "openiam/internal/authn/application"
-
-	authzEvent "openiam/internal/authz/adapter/inbound/event"
-	authzRest "openiam/internal/authz/adapter/inbound/rest"
-	authzPersistence "openiam/internal/authz/adapter/outbound/persistence"
-	authzApp "openiam/internal/authz/application"
-	authzQuery "openiam/internal/authz/application/query"
-	authzDomain "openiam/internal/authz/domain"
-
-	identityRest "openiam/internal/identity/adapter/inbound/rest"
-	identityPersistence "openiam/internal/identity/adapter/outbound/persistence"
-	identityApp "openiam/internal/identity/application"
-
-	tenantRest "openiam/internal/tenant/adapter/inbound/rest"
-	tenantPersistence "openiam/internal/tenant/adapter/outbound/persistence"
-	tenantApp "openiam/internal/tenant/application"
+	"openiam/internal/authz"
+	"openiam/internal/identity"
+	"openiam/internal/tenant"
 
 	shared "openiam/internal/shared/domain"
-	sharedAuth "openiam/internal/shared/auth"
 	"openiam/internal/shared/infra/eventbus"
 	"openiam/internal/shared/infra/persistence"
 
 	mw "openiam/pkg/middleware"
 )
 
-type Config struct {
-	DatabaseDSN     string
-	RedisAddr       string
-	RedisPassword   string
-	RedisDB         int
-	JWTSecret       string
-	JWTIssuer       string
-	AccessTokenTTL  time.Duration
-	RefreshTokenTTL time.Duration
-	SessionTTL      time.Duration
-
-	// SIWEDomain is the domain validated against the SIWE message (e.g. "example.com").
-	// Leave empty to disable the SIWE strategy.
-	SIWEDomain string
-
-	// WebAuthn / Passkey configuration. Enabled when both RPID and RPOrigins are set.
-	// WebAuthnRPID is the Relying Party identifier, typically the domain without scheme or port (e.g. "example.com").
-	WebAuthnRPID string
-	// WebAuthnRPName is the human-readable site name shown to the user (e.g. "Example Inc.").
-	WebAuthnRPName string
-	// WebAuthnRPOrigins is the list of permitted origins (e.g. ["https://example.com"]).
-	WebAuthnRPOrigins []string
+// Deps holds shared infrastructure that modules depend on.
+type Deps struct {
+	DB        *sqlx.DB
+	Redis     *redis.Client
+	EventBus  shared.EventBus
+	TxManager *persistence.TxManager
+	Logger    *slog.Logger
 }
 
+// Engine holds initialized modules and the assembled HTTP router.
 type Engine struct {
-	Identity *identityApp.IdentityService
-	Authn    *authnApp.AuthnAppService
-	Authz    *authzApp.AuthzAppService
-	Tenant   *tenantApp.TenantAppService
-	EventBus shared.EventBus
+	Identity *identity.Registry
+	Authn    *authn.Authenticator
+	Authz    *authz.Authorizer
+	Tenant   *tenant.Manager
+	Deps     Deps
 
-	router chi.Router
-	db     *sqlx.DB
-	redis  *redis.Client
-	logger *slog.Logger
+	router    chi.Router
+	closers   []func() error
 }
 
-func New(cfg Config, logger *slog.Logger) (*Engine, error) {
-	if logger == nil {
-		logger = slog.Default()
-	}
+type Option func(e *Engine) error
 
-	db, err := sqlx.Connect("postgres", cfg.DatabaseDSN)
-	if err != nil {
-		return nil, fmt.Errorf("connect postgres: %w", err)
-	}
+// --- Infrastructure options ---
 
-	rdb := redis.NewClient(&redis.Options{
-		Addr:     cfg.RedisAddr,
-		Password: cfg.RedisPassword,
-		DB:       cfg.RedisDB,
-	})
-	if err = rdb.Ping(context.Background()).Err(); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("connect redis: %w", err)
-	}
-
-	bus := eventbus.NewMemoryEventBus(logger)
-	txMgr := persistence.NewTxManager(db)
-
-	// --- Identity ---
-	userRepo := identityPersistence.NewPostgresUserRepository(db)
-	identitySvc := identityApp.NewIdentityService(userRepo, bus, txMgr)
-
-	// --- Authn ---
-	credRepo := authnPersistence.NewPostgresCredentialRepo(db)
-	sessionRepo := authnPersistence.NewRedisSessionRepo(rdb)
-	challengeStore := authnPersistence.NewRedisChallengeStore(rdb)
-
-	jwtProvider := authnToken.NewJWTProvider(authnToken.JWTConfig{
-		Secret:         cfg.JWTSecret,
-		Issuer:         cfg.JWTIssuer,
-		AccessTokenTTL: cfg.AccessTokenTTL,
-	})
-
-	identityAdapter := &identityBridgeAdapter{svc: identitySvc}
-
-	sessionTTL := cfg.SessionTTL
-	if sessionTTL == 0 {
-		sessionTTL = cfg.RefreshTokenTTL
-	}
-	if sessionTTL == 0 {
-		sessionTTL = 7 * 24 * time.Hour
-	}
-
-	authnOpts := []authnApp.Option{
-		authnApp.WithPasswordAuth(credRepo, identityAdapter),
-		authnApp.WithRegistrar(identityAdapter),
-	}
-
-	if cfg.SIWEDomain != "" {
-		authnOpts = append(authnOpts, authnApp.WithSIWEAuth(
-			authnStrategy.SIWEConfig{Domain: cfg.SIWEDomain},
-			credRepo, identityAdapter, identityAdapter, challengeStore,
-		))
-	}
-
-	if cfg.WebAuthnRPID != "" && len(cfg.WebAuthnRPOrigins) > 0 {
-		authnOpts = append(authnOpts, authnApp.WithWebAuthnAuth(
-			authnStrategy.WebAuthnConfig{
-				RPID:          cfg.WebAuthnRPID,
-				RPDisplayName: cfg.WebAuthnRPName,
-				RPOrigins:     cfg.WebAuthnRPOrigins,
-			},
-			credRepo, identityAdapter, identityAdapter, challengeStore,
-		))
-	}
-
-	authnSvc, err := authnApp.NewAuthnAppService(
-		sessionRepo, jwtProvider, bus, sessionTTL, logger,
-		authnOpts...,
-	)
-	if err != nil {
-		_ = db.Close()
-		_ = rdb.Close()
-		return nil, fmt.Errorf("init authn service: %w", err)
-	}
-	authnHandler := authnRest.NewHandler(authnSvc, jwtProvider)
-
-	authnSub := authnEvent.NewSubscriber(credRepo, logger)
-	if err := authnSub.Register(bus); err != nil {
-		_ = db.Close()
-		_ = rdb.Close()
-		return nil, fmt.Errorf("register authn event subscriber: %w", err)
-	}
-
-	// --- Authz ---
-	roleRepo := authzPersistence.NewPostgresRoleRepository(db)
-	resPermRepo := authzPersistence.NewPostgresResourcePermissionRepository(db)
-	permDefRepo := authzPersistence.NewPostgresPermissionDefinitionRepository(db)
-	enforcer := authzDomain.NewEnforcer(roleRepo, resPermRepo)
-	authzSvc := authzApp.NewAuthzAppService(roleRepo, resPermRepo, permDefRepo, enforcer, bus, txMgr)
-
-	// Protocol-agnostic permission checker — shared by all adapters.
-	accessCheck := sharedAuth.Checker(func(ctx context.Context, resource, action string) error {
-		claims, ok := sharedAuth.ClaimsFromContext(ctx)
-		if !ok {
-			return shared.ErrUnauthorized
+func WithPostgres(dsn string) Option {
+	return func(e *Engine) error {
+		db, err := sqlx.Connect("postgres", dsn)
+		if err != nil {
+			return fmt.Errorf("connect postgres: %w", err)
 		}
-		appID := claims.AppID
-		if appID == "" {
-			appID = "default"
+		e.Deps.DB = db
+		e.Deps.TxManager = persistence.NewTxManager(db)
+		e.closers = append(e.closers, db.Close)
+		return nil
+	}
+}
+
+func WithDB(db *sqlx.DB) Option {
+	return func(e *Engine) error {
+		e.Deps.DB = db
+		e.Deps.TxManager = persistence.NewTxManager(db)
+		return nil
+	}
+}
+
+func WithRedis(addr, password string, db int) Option {
+	return func(e *Engine) error {
+		rdb := redis.NewClient(&redis.Options{
+			Addr:     addr,
+			Password: password,
+			DB:       db,
+		})
+		if err := rdb.Ping(context.Background()).Err(); err != nil {
+			return fmt.Errorf("connect redis: %w", err)
 		}
-		result, err := authzSvc.CheckPermission(ctx, &authzQuery.CheckPermission{
-			UserID:   claims.UserID,
-			AppID:    appID,
-			Resource: resource,
-			Action:   action,
+		e.Deps.Redis = rdb
+		e.closers = append(e.closers, rdb.Close)
+		return nil
+	}
+}
+
+func WithRedisClient(rdb *redis.Client) Option {
+	return func(e *Engine) error {
+		e.Deps.Redis = rdb
+		return nil
+	}
+}
+
+func WithEventBus(bus shared.EventBus) Option {
+	return func(e *Engine) error {
+		e.Deps.EventBus = bus
+		return nil
+	}
+}
+
+func WithLogger(logger *slog.Logger) Option {
+	return func(e *Engine) error {
+		e.Deps.Logger = logger
+		return nil
+	}
+}
+
+// --- Module options ---
+
+func WithIdentity() Option {
+	return func(e *Engine) error {
+		e.ensureDefaults()
+		e.Identity = identity.NewRegistry(e.Deps.DB, e.Deps.EventBus, e.Deps.TxManager, e.checkerOrNil())
+		return nil
+	}
+}
+
+func WithAuthn(cfg authn.Config) Option {
+	return func(e *Engine) error {
+		e.ensureDefaults()
+		if e.Identity == nil {
+			return fmt.Errorf("WithAuthn requires WithIdentity to be applied first")
+		}
+		if e.Deps.Redis == nil {
+			return fmt.Errorf("WithAuthn requires Redis (use WithRedis)")
+		}
+		jwtProvider := authnToken.NewJWTProvider(authnToken.JWTConfig{
+			Secret:         cfg.JWTSecret,
+			Issuer:         cfg.JWTIssuer,
+			AccessTokenTTL: cfg.AccessTokenTTL,
+		})
+		mod, err := authn.NewAuthenticator(cfg, authn.AuthenticatorDeps{
+			Credentials:   authnPersistence.NewPostgresCredentialRepo(e.Deps.DB),
+			Sessions:      authnPersistence.NewRedisSessionRepo(e.Deps.Redis),
+			Challenges:    authnPersistence.NewRedisChallengeStore(e.Deps.Redis),
+			EventBus:      e.Deps.EventBus,
+			Identity:      authn.NewIdentityBridge(e.Identity.Service),
+			TokenProvider: jwtProvider,
+			Logger:        e.Deps.Logger,
 		})
 		if err != nil {
 			return err
 		}
-		if !result.Allowed {
-			return shared.ErrForbidden
-		}
+		e.Authn = mod
 		return nil
-	})
+	}
+}
 
-	authzHandler := authzRest.NewHandler(authzSvc, accessCheck)
-	identityHandler := identityRest.NewHandler(identitySvc, accessCheck)
+func WithAuthz() Option {
+	return func(e *Engine) error {
+		e.ensureDefaults()
+		mod, err := authz.NewAuthorizer(e.Deps.DB, e.Deps.EventBus, e.Deps.TxManager)
+		if err != nil {
+			return err
+		}
+		e.Authz = mod
+		e.lateBindChecker()
+		return nil
+	}
+}
 
-	authzSub := authzEvent.NewSubscriber(roleRepo, permDefRepo, bus, txMgr)
-	if err = authzSub.Register(); err != nil {
-		_ = db.Close()
-		_ = rdb.Close()
-		return nil, fmt.Errorf("register authz event subscriber: %w", err)
+func WithTenant() Option {
+	return func(e *Engine) error {
+		e.ensureDefaults()
+		e.Tenant = tenant.NewManager(e.Deps.DB, e.Deps.EventBus, e.Deps.TxManager, e.checkerOrNil())
+		return nil
+	}
+}
+
+// New creates an Engine by applying the given options in order.
+// Infrastructure options (WithPostgres, WithRedis) must come before module
+// options (WithIdentity, WithAuthn, WithAuthz, WithTenant).
+func New(opts ...Option) (*Engine, error) {
+	e := &Engine{}
+
+	for _, opt := range opts {
+		if err := opt(e); err != nil {
+			e.Close()
+			return nil, err
+		}
 	}
 
-	// --- Tenant ---
-	tenantRepo := tenantPersistence.NewPostgresTenantRepository(db)
-	appRepo := tenantPersistence.NewPostgresApplicationRepository(db)
-	tenantSvc := tenantApp.NewTenantAppService(tenantRepo, appRepo, bus, txMgr)
-	tenantHandler := tenantRest.NewHandler(tenantSvc, accessCheck)
+	return e, nil
+}
 
-	// --- Router ---
+// Handler returns an http.Handler with all registered module routes mounted
+// at their default paths under /api/v1.
+func (e *Engine) Handler() http.Handler {
 	r := chi.NewRouter()
-	r.Use(middleware.RequestID)
-	r.Use(middleware.RealIP)
-	r.Use(middleware.Recoverer)
-	r.Use(middleware.Timeout(30 * time.Second))
-
-	r.Mount("/__test/authn", http.StripPrefix("/__test/authn", testAuthnPageHandler()))
+	r.Use(chimw.RequestID)
+	r.Use(chimw.RealIP)
+	r.Use(chimw.Recoverer)
+	r.Use(chimw.Timeout(30 * time.Second))
 
 	r.Route("/api/v1", func(api chi.Router) {
-		api.Mount("/auth", authnHandler.Routes())
+		if e.Authn != nil && e.Authn.Handler != nil {
+			api.Mount("/auth", e.Authn.Handler.Routes())
+			r.Mount("/__test/authn", http.StripPrefix("/__test/authn", testAuthnPageHandler()))
+		}
 
 		api.Group(func(protected chi.Router) {
-			protected.Use(mw.BearerAuth(jwtProvider))
-			protected.Mount("/tenants", tenantHandler.TenantRoutes())
-			protected.Mount("/applications", tenantHandler.ApplicationRoutes())
-			protected.Mount("/users", identityHandler.Routes())
-			protected.Mount("/authz", authzHandler.Routes())
+			if e.Authn != nil {
+				protected.Use(mw.BearerAuth(e.Authn.TokenProvider))
+			}
+
+			if e.Tenant != nil && e.Tenant.Handler != nil {
+				protected.Mount("/tenants", e.Tenant.Handler.TenantRoutes())
+				protected.Mount("/applications", e.Tenant.Handler.ApplicationRoutes())
+			}
+			if e.Identity != nil && e.Identity.Handler != nil {
+				protected.Mount("/users", e.Identity.Handler.Routes())
+			}
+			if e.Authz != nil && e.Authz.Handler != nil {
+				protected.Mount("/authz", e.Authz.Handler.Routes())
+			}
 		})
 	})
 
-	return &Engine{
-		Identity: identitySvc,
-		Authn:    authnSvc,
-		Authz:    authzSvc,
-		Tenant:   tenantSvc,
-		EventBus: bus,
-		router:   r,
-		db:       db,
-		redis:    rdb,
-		logger:   logger,
-	}, nil
-}
-
-func (e *Engine) Handler() http.Handler {
-	return e.router
+	e.router = r
+	return r
 }
 
 func (e *Engine) Close() error {
-	dbErr := e.db.Close()
-	redisErr := e.redis.Close()
-	if dbErr != nil {
-		return dbErr
+	var first error
+	for i := len(e.closers) - 1; i >= 0; i-- {
+		if err := e.closers[i](); err != nil && first == nil {
+			first = err
+		}
 	}
-	return redisErr
+	return first
+}
+
+func (e *Engine) checkerOrNil() func(ctx context.Context, resource, action string) error {
+	if e.Authz != nil {
+		return e.Authz.Checker
+	}
+	return nil
+}
+
+func (e *Engine) ensureDefaults() {
+	if e.Deps.Logger == nil {
+		e.Deps.Logger = slog.Default()
+	}
+	if e.Deps.EventBus == nil {
+		e.Deps.EventBus = eventbus.NewMemoryEventBus(e.Deps.Logger)
+	}
+}
+
+// lateBindChecker re-creates handlers for modules that were initialized before
+// the authz Checker was available.
+func (e *Engine) lateBindChecker() {
+	if e.Authz == nil {
+		return
+	}
+	check := e.Authz.Checker
+
+	if e.Identity != nil && e.Identity.Handler == nil {
+		e.Identity = identity.NewRegistry(e.Deps.DB, e.Deps.EventBus, e.Deps.TxManager, check)
+	}
+	if e.Tenant != nil && e.Tenant.Handler == nil {
+		e.Tenant = tenant.NewManager(e.Deps.DB, e.Deps.EventBus, e.Deps.TxManager, check)
+	}
 }

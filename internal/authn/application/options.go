@@ -14,16 +14,16 @@ func WithPasswordAuth(credRepo domain.CredentialRepository, userProvider domain.
 	}
 }
 
-func WithSIWEAuth(cfg strategy.SIWEConfig, credRepo domain.CredentialRepository, userProvider domain.UserInfoProvider, externalIDP domain.ExternalIdentityProvider, store domain.ChallengeStore) Option {
+func WithSIWEAuth(cfg strategy.SIWEConfig, credRepo domain.CredentialRepository, identity domain.ExternalLoginIdentity, store domain.ChallengeStore) Option {
 	return func(svc *AuthnAppService) error {
-		svc.strategies[domain.CredentialSIWE] = strategy.NewSIWEStrategy(cfg, credRepo, userProvider, externalIDP, store)
+		svc.strategies[domain.CredentialSIWE] = strategy.NewSIWEStrategy(cfg, credRepo, identity, store)
 		return nil
 	}
 }
 
-func WithWebAuthnAuth(cfg strategy.WebAuthnConfig, credRepo domain.CredentialRepository, userProvider domain.UserInfoProvider, externalIDP domain.ExternalIdentityProvider, store domain.ChallengeStore) Option {
+func WithWebAuthnAuth(cfg strategy.WebAuthnConfig, credRepo domain.CredentialRepository, identity domain.ExternalLoginIdentity, store domain.ChallengeStore) Option {
 	return func(svc *AuthnAppService) error {
-		s, err := strategy.NewWebAuthnStrategy(cfg, credRepo, userProvider, externalIDP, store)
+		s, err := strategy.NewWebAuthnStrategy(cfg, credRepo, identity, store)
 		if err != nil {
 			return fmt.Errorf("init webauthn strategy: %w", err)
 		}

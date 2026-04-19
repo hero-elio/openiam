@@ -5,7 +5,6 @@ import (
 	"time"
 
 	shared "openiam/internal/shared/domain"
-	"openiam/internal/shared/infra/persistence"
 
 	"openiam/internal/authz/application/command"
 	"openiam/internal/authz/application/query"
@@ -63,7 +62,7 @@ type AuthzAppService struct {
 	permDefRepo domain.PermissionDefinitionRepository
 	enforcer    *domain.Enforcer
 	eventBus    shared.EventBus
-	txManager   *persistence.TxManager
+	txManager   shared.TxManager
 }
 
 func NewAuthzAppService(
@@ -72,7 +71,7 @@ func NewAuthzAppService(
 	permDefRepo domain.PermissionDefinitionRepository,
 	enforcer *domain.Enforcer,
 	eventBus shared.EventBus,
-	txManager *persistence.TxManager,
+	txManager shared.TxManager,
 ) *AuthzAppService {
 	return &AuthzAppService{
 		roleRepo:    roleRepo,

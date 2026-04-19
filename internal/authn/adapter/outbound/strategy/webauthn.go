@@ -47,12 +47,11 @@ type webAuthnBindParams struct {
 type WebAuthnStrategy struct {
 	wa             *gowebauthn.WebAuthn
 	credRepo       authnDomain.CredentialRepository
-	userProvider   authnDomain.UserInfoProvider
-	externalIDP    authnDomain.ExternalIdentityProvider
+	identity       authnDomain.ExternalLoginIdentity
 	challengeStore authnDomain.ChallengeStore
 }
 
-func NewWebAuthnStrategy(cfg WebAuthnConfig, credRepo authnDomain.CredentialRepository, userProvider authnDomain.UserInfoProvider, externalIDP authnDomain.ExternalIdentityProvider, store authnDomain.ChallengeStore) (*WebAuthnStrategy, error) {
+func NewWebAuthnStrategy(cfg WebAuthnConfig, credRepo authnDomain.CredentialRepository, identity authnDomain.ExternalLoginIdentity, store authnDomain.ChallengeStore) (*WebAuthnStrategy, error) {
 	wa, err := gowebauthn.New(&gowebauthn.Config{
 		RPID:          cfg.RPID,
 		RPDisplayName: cfg.RPDisplayName,
@@ -65,8 +64,7 @@ func NewWebAuthnStrategy(cfg WebAuthnConfig, credRepo authnDomain.CredentialRepo
 	return &WebAuthnStrategy{
 		wa:             wa,
 		credRepo:       credRepo,
-		userProvider:   userProvider,
-		externalIDP:    externalIDP,
+		identity:       identity,
 		challengeStore: store,
 	}, nil
 }
@@ -148,7 +146,7 @@ func (s *WebAuthnStrategy) Authenticate(ctx context.Context, req *authnDomain.Au
 		return nil, err
 	}
 
-	info, err := s.userProvider.GetUserInfo(ctx, cred.UserID)
+	info, err := s.identity.GetUserInfo(ctx, cred.UserID)
 	if err != nil {
 		return nil, err
 	}
@@ -210,7 +208,7 @@ func (s *WebAuthnStrategy) authenticateViaRegistration(
 
 	existing, err := s.credRepo.FindBySubjectAndType(ctx, p.RawID, req.AppID, authnDomain.CredentialWebAuthn)
 	if err == nil {
-		info, infoErr := s.userProvider.GetUserInfo(ctx, existing.UserID)
+		info, infoErr := s.identity.GetUserInfo(ctx, existing.UserID)
 		if infoErr != nil {
 			return nil, infoErr
 		}
@@ -225,7 +223,7 @@ func (s *WebAuthnStrategy) authenticateViaRegistration(
 		return nil, err
 	}
 
-	info, createErr := s.externalIDP.EnsureExternalUser(ctx, &authnDomain.EnsureExternalUserRequest{
+	info, createErr := s.identity.ProvisionExternalUser(ctx, &authnDomain.ProvisionExternalUserRequest{
 		AppID:             req.AppID,
 		TenantID:          "default",
 		Provider:          string(authnDomain.CredentialWebAuthn),

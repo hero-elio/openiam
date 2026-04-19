@@ -5,7 +5,6 @@ import (
 	"time"
 
 	shared "openiam/internal/shared/domain"
-	"openiam/internal/shared/infra/persistence"
 	"openiam/internal/tenant/application/command"
 	"openiam/internal/tenant/application/query"
 	"openiam/internal/tenant/domain"
@@ -38,14 +37,14 @@ type TenantAppService struct {
 	tenantRepo domain.TenantRepository
 	appRepo    domain.ApplicationRepository
 	eventBus   shared.EventBus
-	txManager  *persistence.TxManager
+	txManager  shared.TxManager
 }
 
 func NewTenantAppService(
 	tenantRepo domain.TenantRepository,
 	appRepo domain.ApplicationRepository,
 	eventBus shared.EventBus,
-	txManager *persistence.TxManager,
+	txManager shared.TxManager,
 ) *TenantAppService {
 	return &TenantAppService{
 		tenantRepo: tenantRepo,

@@ -4,7 +4,6 @@ import (
 	"context"
 
 	shared "openiam/internal/shared/domain"
-	"openiam/internal/shared/infra/persistence"
 
 	"openiam/internal/identity/application/command"
 	"openiam/internal/identity/application/query"
@@ -23,10 +22,10 @@ type UserDTO struct {
 type IdentityService struct {
 	userRepo  domain.UserRepository
 	eventBus  shared.EventBus
-	txManager *persistence.TxManager
+	txManager shared.TxManager
 }
 
-func NewIdentityService(userRepo domain.UserRepository, eventBus shared.EventBus, txManager *persistence.TxManager) *IdentityService {
+func NewIdentityService(userRepo domain.UserRepository, eventBus shared.EventBus, txManager shared.TxManager) *IdentityService {
 	return &IdentityService{
 		userRepo:  userRepo,
 		eventBus:  eventBus,
