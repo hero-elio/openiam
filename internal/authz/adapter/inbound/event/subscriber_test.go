@@ -69,8 +69,8 @@ func (f *fakeRoleRepo) SaveUserAppRole(_ context.Context, uar *authzDomain.UserA
 	return nil
 }
 
-func (f *fakeRoleRepo) DeleteUserAppRole(context.Context, shared.UserID, shared.AppID, shared.RoleID) error {
-	return nil
+func (f *fakeRoleRepo) DeleteUserAppRole(context.Context, shared.UserID, shared.AppID, shared.RoleID) (bool, error) {
+	return true, nil
 }
 
 func (f *fakeRoleRepo) FindUserAppRoles(context.Context, shared.UserID, shared.AppID) ([]*authzDomain.UserAppRole, error) {

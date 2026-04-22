@@ -254,13 +254,20 @@ func (r *PostgresRoleRepository) SaveUserAppRole(ctx context.Context, uar *domai
 	return domain.ErrRoleNotFound
 }
 
-func (r *PostgresRoleRepository) DeleteUserAppRole(ctx context.Context, userID shared.UserID, appID shared.AppID, roleID shared.RoleID) error {
+func (r *PostgresRoleRepository) DeleteUserAppRole(ctx context.Context, userID shared.UserID, appID shared.AppID, roleID shared.RoleID) (bool, error) {
 	conn := sharedPersistence.Conn(ctx, r.db)
 
-	_, err := conn.ExecContext(ctx,
+	res, err := conn.ExecContext(ctx,
 		`DELETE FROM user_app_roles WHERE user_id = $1 AND app_id = $2 AND role_id = $3`,
 		userID.String(), appID.String(), roleID.String())
-	return err
+	if err != nil {
+		return false, err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return affected > 0, nil
 }
 
 func (r *PostgresRoleRepository) FindUserAppRoles(ctx context.Context, userID shared.UserID, appID shared.AppID) ([]*domain.UserAppRole, error) {

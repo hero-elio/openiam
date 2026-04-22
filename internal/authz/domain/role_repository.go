@@ -15,7 +15,10 @@ type RoleRepository interface {
 	Delete(ctx context.Context, id shared.RoleID) error
 
 	SaveUserAppRole(ctx context.Context, uar *UserAppRole) error
-	DeleteUserAppRole(ctx context.Context, userID shared.UserID, appID shared.AppID, roleID shared.RoleID) error
+	// DeleteUserAppRole removes the assignment if it exists. The bool reports
+	// whether a row was actually deleted, so callers can keep the operation
+	// idempotent (e.g. avoid emitting an Unassigned event for a no-op).
+	DeleteUserAppRole(ctx context.Context, userID shared.UserID, appID shared.AppID, roleID shared.RoleID) (bool, error)
 	FindUserAppRoles(ctx context.Context, userID shared.UserID, appID shared.AppID) ([]*UserAppRole, error)
 }
 

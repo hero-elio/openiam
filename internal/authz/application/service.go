@@ -225,8 +225,14 @@ func (s *AuthzAppService) UnassignRole(ctx context.Context, userID, appID, roleI
 	rid := shared.RoleID(roleID)
 
 	return s.txManager.Execute(ctx, func(txCtx context.Context) error {
-		if err := s.roleRepo.DeleteUserAppRole(txCtx, uid, aid, rid); err != nil {
+		removed, err := s.roleRepo.DeleteUserAppRole(txCtx, uid, aid, rid)
+		if err != nil {
 			return err
+		}
+		if !removed {
+			// Nothing changed — keep the operation idempotent without
+			// emitting a misleading event downstream subscribers would react to.
+			return nil
 		}
 		return s.eventBus.Publish(txCtx, domain.RoleUnassignedEvent{
 			UserID:    uid,

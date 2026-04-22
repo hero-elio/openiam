@@ -34,8 +34,8 @@ func (f *fakeRoleRepo) Delete(context.Context, shared.RoleID) error { return nil
 
 func (f *fakeRoleRepo) SaveUserAppRole(context.Context, *UserAppRole) error { return nil }
 
-func (f *fakeRoleRepo) DeleteUserAppRole(context.Context, shared.UserID, shared.AppID, shared.RoleID) error {
-	return nil
+func (f *fakeRoleRepo) DeleteUserAppRole(context.Context, shared.UserID, shared.AppID, shared.RoleID) (bool, error) {
+	return true, nil
 }
 
 func (f *fakeRoleRepo) FindUserAppRoles(context.Context, shared.UserID, shared.AppID) ([]*UserAppRole, error) {
