@@ -3,6 +3,11 @@ package domain
 import "github.com/google/uuid"
 
 type UserID string
+
+// GranterSystem is the explicit identity for non-human grantors.
+// We avoid using NULL to imply "system-issued" — if the distinction
+// matters to the business, give it a name instead of a missing value.
+const GranterSystem UserID = "system"
 type TenantID string
 type RoleID string
 type AppID string
