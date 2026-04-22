@@ -123,7 +123,7 @@ func NewAuthenticator(cfg Config, deps AuthenticatorDeps) (*Authenticator, error
 		return nil, fmt.Errorf("register authn event subscriber: %w", err)
 	}
 
-	handler := authnRest.NewHandler(svc, deps.TokenProvider)
+	handler := authnRest.NewHandler(svc, deps.TokenProvider, deps.Identity)
 
 	return &Authenticator{
 		Service:       svc,
