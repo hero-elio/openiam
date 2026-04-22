@@ -25,7 +25,7 @@ import (
 	"openiam/internal/shared/infra/eventbus"
 	"openiam/internal/shared/infra/persistence"
 
-	mw "openiam/pkg/middleware"
+	transportRest "openiam/pkg/iam/transport/rest"
 )
 
 // Deps holds shared infrastructure that modules depend on.
@@ -45,8 +45,8 @@ type Engine struct {
 	Tenant   *tenant.Manager
 	Deps     Deps
 
-	router    chi.Router
-	closers   []func() error
+	router  chi.Router
+	closers []func() error
 }
 
 type Option func(e *Engine) error
@@ -120,7 +120,6 @@ func WithIdentity() Option {
 			e.Deps.DB,
 			e.Deps.EventBus,
 			e.Deps.TxManager,
-			e.checkerOrNil(),
 			e.scopeValidatorOrNil(),
 		)
 		e.lateBindAuthzExistence()
@@ -169,7 +168,6 @@ func WithAuthz() Option {
 			return err
 		}
 		e.Authz = mod
-		e.lateBindChecker()
 		e.lateBindAuthzExistence()
 		return nil
 	}
@@ -178,7 +176,7 @@ func WithAuthz() Option {
 func WithTenant() Option {
 	return func(e *Engine) error {
 		e.ensureDefaults()
-		e.Tenant = tenant.NewManager(e.Deps.DB, e.Deps.EventBus, e.Deps.TxManager, e.checkerOrNil())
+		e.Tenant = tenant.NewManager(e.Deps.DB, e.Deps.EventBus, e.Deps.TxManager)
 		e.lateBindScopeValidator()
 		e.lateBindAuthzExistence()
 		return nil
@@ -203,6 +201,10 @@ func New(opts ...Option) (*Engine, error) {
 
 // Handler returns an http.Handler with all registered module routes mounted
 // at their default paths under /api/v1.
+//
+// Mounting goes through pkg/iam/transport/rest so the same Mount* helpers
+// power both this convenience entry point and any custom router an SDK
+// consumer assembles.
 func (e *Engine) Handler() http.Handler {
 	r := chi.NewRouter()
 	r.Use(chimw.RequestID)
@@ -227,27 +229,39 @@ func (e *Engine) Handler() http.Handler {
 		// streaming attack can't OOM us by feeding json.Decode a
 		// gigabyte payload. The cap applies to every API route
 		// (auth + protected) — health endpoints stay unrestricted.
-		api.Use(mw.BodyLimit(mw.DefaultMaxRequestBodyBytes))
+		api.Use(transportRest.BodyLimit(transportRest.DefaultMaxRequestBodyBytes))
 
-		if e.Authn != nil && e.Authn.Handler != nil {
-			api.Mount("/auth", e.Authn.Handler.Routes())
+		if e.Authn != nil {
+			api.Route("/auth", func(auth chi.Router) {
+				transportRest.MountAuthn(auth, e.Authn.Service)
+			})
 			r.Mount("/__test/authn", http.StripPrefix("/__test/authn", testAuthnPageHandler()))
 		}
 
 		api.Group(func(protected chi.Router) {
 			if e.Authn != nil {
-				protected.Use(mw.BearerAuth(e.Authn.TokenProvider))
+				protected.Use(transportRest.BearerAuth(e.Authn.Service.AuthenticateToken))
 			}
 
-			if e.Tenant != nil && e.Tenant.Handler != nil {
-				protected.Mount("/tenants", e.Tenant.Handler.TenantRoutes())
-				protected.Mount("/applications", e.Tenant.Handler.ApplicationRoutes())
+			check := e.checkerOrNil()
+
+			if e.Tenant != nil && check != nil {
+				protected.Route("/tenants", func(t chi.Router) {
+					transportRest.MountTenant(t, e.Tenant.Service, check)
+				})
+				protected.Route("/applications", func(a chi.Router) {
+					transportRest.MountApplications(a, e.Tenant.Service, check)
+				})
 			}
-			if e.Identity != nil && e.Identity.Handler != nil {
-				protected.Mount("/users", e.Identity.Handler.Routes())
+			if e.Identity != nil && check != nil {
+				protected.Route("/users", func(u chi.Router) {
+					transportRest.MountIdentity(u, e.Identity.Service, check)
+				})
 			}
-			if e.Authz != nil && e.Authz.Handler != nil {
-				protected.Mount("/authz", e.Authz.Handler.Routes())
+			if e.Authz != nil && check != nil {
+				protected.Route("/authz", func(a chi.Router) {
+					transportRest.MountAuthz(a, e.Authz.Service, check)
+				})
 			}
 		})
 	})
@@ -340,22 +354,6 @@ func (e *Engine) ensureDefaults() {
 	}
 }
 
-// lateBindChecker re-creates handlers for modules that were initialized before
-// the authz Checker was available.
-func (e *Engine) lateBindChecker() {
-	if e.Authz == nil {
-		return
-	}
-	check := e.Authz.Checker
-
-	if e.Identity != nil && e.Identity.Handler == nil {
-		e.Identity = identity.NewRegistry(e.Deps.DB, e.Deps.EventBus, e.Deps.TxManager, check, e.scopeValidatorOrNil())
-	}
-	if e.Tenant != nil && e.Tenant.Handler == nil {
-		e.Tenant = tenant.NewManager(e.Deps.DB, e.Deps.EventBus, e.Deps.TxManager, check)
-	}
-}
-
 // lateBindAuthzExistence wires the subject-existence port into the
 // authz service once both identity and tenant modules are available.
 // Called from WithIdentity, WithTenant, and WithAuthz so the order of
@@ -396,7 +394,6 @@ func (e *Engine) lateBindScopeValidator() {
 		e.Deps.DB,
 		e.Deps.EventBus,
 		e.Deps.TxManager,
-		e.checkerOrNil(),
 		e.scopeValidatorOrNil(),
 	)
 }

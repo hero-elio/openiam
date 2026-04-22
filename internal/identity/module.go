@@ -3,25 +3,24 @@ package identity
 import (
 	"github.com/jmoiron/sqlx"
 
-	sharedAuth "openiam/internal/shared/auth"
 	shared "openiam/internal/shared/domain"
 
-	"openiam/internal/identity/adapter/inbound/rest"
 	identityPersistence "openiam/internal/identity/adapter/outbound/persistence"
 	"openiam/internal/identity/application"
 	identityDomain "openiam/internal/identity/domain"
 )
 
+// Registry bundles the wired identity application service. The HTTP
+// handler no longer lives here — transport adapters in
+// pkg/iam/transport/rest consume Service directly.
 type Registry struct {
 	Service *application.IdentityService
-	Handler *rest.Handler
 }
 
 func NewRegistry(
 	db *sqlx.DB,
 	bus shared.EventBus,
 	txMgr shared.TxManager,
-	check sharedAuth.Checker,
 	scopes identityDomain.ScopeValidator,
 ) *Registry {
 	userRepo := identityPersistence.NewPostgresUserRepository(db)
@@ -32,13 +31,5 @@ func NewRegistry(
 	}
 	svc := application.NewIdentityService(userRepo, bus, txMgr, opts...)
 
-	var handler *rest.Handler
-	if check != nil {
-		handler = rest.NewHandler(svc, check)
-	}
-
-	return &Registry{
-		Service: svc,
-		Handler: handler,
-	}
+	return &Registry{Service: svc}
 }

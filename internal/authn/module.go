@@ -7,7 +7,6 @@ import (
 	"time"
 
 	authnEvent "openiam/internal/authn/adapter/inbound/event"
-	authnRest "openiam/internal/authn/adapter/inbound/rest"
 	authnStrategy "openiam/internal/authn/adapter/outbound/strategy"
 	authnApp "openiam/internal/authn/application"
 	authnDomain "openiam/internal/authn/domain"
@@ -53,9 +52,12 @@ const MinJWTSecretLength = 32
 // safe length, and the caller did not explicitly opt into insecure mode.
 var ErrInsecureJWTSecret = fmt.Errorf("authn: jwt secret is missing, default, or shorter than %d bytes — set IAM_JWT_SECRET to a strong random value (or AllowInsecureJWTSecret for non-production)", MinJWTSecretLength)
 
+// Authenticator bundles the wired authn application service and the
+// token provider needed by transport-layer middleware. The HTTP handler
+// no longer lives here — transport adapters in pkg/iam/transport/rest
+// consume Service directly.
 type Authenticator struct {
 	Service       *authnApp.AuthnAppService
-	Handler       *authnRest.Handler
 	TokenProvider authnDomain.TokenProvider
 }
 
@@ -172,11 +174,8 @@ func NewAuthenticator(cfg Config, deps AuthenticatorDeps) (*Authenticator, error
 		return nil, fmt.Errorf("register authn event subscriber: %w", err)
 	}
 
-	handler := authnRest.NewHandler(svc, deps.TokenProvider)
-
 	return &Authenticator{
 		Service:       svc,
-		Handler:       handler,
 		TokenProvider: deps.TokenProvider,
 	}, nil
 }

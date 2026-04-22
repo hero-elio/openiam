@@ -7,7 +7,6 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	authzEvent "openiam/internal/authz/adapter/inbound/event"
-	authzRest "openiam/internal/authz/adapter/inbound/rest"
 	authzPersistence "openiam/internal/authz/adapter/outbound/persistence"
 	authzApp "openiam/internal/authz/application"
 	authzQuery "openiam/internal/authz/application/query"
@@ -17,9 +16,12 @@ import (
 	shared "openiam/internal/shared/domain"
 )
 
+// Authorizer bundles the wired authz application service plus the
+// derived Checker used by transport-layer middleware. The HTTP handler
+// no longer lives here — transport adapters in pkg/iam/transport/rest
+// consume Service directly.
 type Authorizer struct {
 	Service *authzApp.AuthzAppService
-	Handler *authzRest.Handler
 	Checker sharedAuth.Checker
 }
 
@@ -58,8 +60,6 @@ func NewAuthorizer(db *sqlx.DB, bus shared.EventBus, txMgr shared.TxManager) (*A
 		return nil
 	})
 
-	handler := authzRest.NewHandler(svc, checker)
-
 	sub := authzEvent.NewSubscriber(roleRepo, roleRepo, permDefRepo, bus, txMgr)
 	if err := sub.Register(); err != nil {
 		return nil, fmt.Errorf("register authz event subscriber: %w", err)
@@ -67,7 +67,6 @@ func NewAuthorizer(db *sqlx.DB, bus shared.EventBus, txMgr shared.TxManager) (*A
 
 	return &Authorizer{
 		Service: svc,
-		Handler: handler,
 		Checker: checker,
 	}, nil
 }
