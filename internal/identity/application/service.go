@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	shared "openiam/internal/shared/domain"
@@ -117,20 +118,40 @@ func (s *IdentityService) RegisterExternalUser(ctx context.Context, cmd *command
 
 	user := domain.NewExternalUser(tenantID, appID, cmd.Provider, cmd.CredentialSubject, cmd.PublicKey)
 
-	if existing, err := s.userRepo.FindByEmail(ctx, tenantID, user.Email); err == nil {
-		return existing.ID, nil
-	}
-
-	if err := s.txManager.Execute(ctx, func(txCtx context.Context) error {
-		if err := s.userRepo.Save(txCtx, user); err != nil {
+	// External identity dedup: the placeholder email encodes
+	// sha256(provider:credential_subject), and the users table holds a
+	// UNIQUE(tenant_id, email). That gives provider-scoped uniqueness for
+	// free, so we only need to (1) do the inevitable existence check and
+	// the write inside the same transaction so concurrent registrations
+	// converge on a single row, and (2) translate a unique-violation back
+	// into "return the existing user" for idempotency.
+	var resolvedID shared.UserID
+	err := s.txManager.Execute(ctx, func(txCtx context.Context) error {
+		if existing, err := s.userRepo.FindByEmail(txCtx, tenantID, user.Email); err == nil {
+			resolvedID = existing.ID
+			return nil
+		} else if !errors.Is(err, domain.ErrUserNotFound) {
 			return err
 		}
+
+		if saveErr := s.userRepo.Save(txCtx, user); saveErr != nil {
+			if errors.Is(saveErr, domain.ErrEmailAlreadyTaken) {
+				existing, lookupErr := s.userRepo.FindByEmail(txCtx, tenantID, user.Email)
+				if lookupErr != nil {
+					return lookupErr
+				}
+				resolvedID = existing.ID
+				return nil
+			}
+			return saveErr
+		}
+		resolvedID = user.ID
 		return s.eventBus.Publish(txCtx, user.PullEvents()...)
-	}); err != nil {
+	})
+	if err != nil {
 		return "", err
 	}
-
-	return user.ID, nil
+	return resolvedID, nil
 }
 
 func (s *IdentityService) GetUser(ctx context.Context, q *query.GetUser) (*UserDTO, error) {

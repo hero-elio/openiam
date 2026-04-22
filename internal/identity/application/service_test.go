@@ -27,14 +27,14 @@ func (f *fakeUserRepo) FindByID(context.Context, shared.UserID) (*domain.User, e
 	if f.findByID != nil {
 		return f.findByID, nil
 	}
-	return nil, shared.ErrNotFound
+	return nil, domain.ErrUserNotFound
 }
 
 func (f *fakeUserRepo) FindByEmail(context.Context, shared.TenantID, domain.Email) (*domain.User, error) {
 	if f.findByEmail != nil {
 		return f.findByEmail, nil
 	}
-	return nil, shared.ErrNotFound
+	return nil, domain.ErrUserNotFound
 }
 
 func (f *fakeUserRepo) ExistsByEmail(context.Context, shared.TenantID, domain.Email) (bool, error) {

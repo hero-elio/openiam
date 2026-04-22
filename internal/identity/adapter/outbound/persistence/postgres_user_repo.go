@@ -7,11 +7,18 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/lib/pq"
 
 	"openiam/internal/identity/domain"
 	shared "openiam/internal/shared/domain"
 	sharedPersistence "openiam/internal/shared/infra/persistence"
 )
+
+// pgUniqueViolation is the SQLSTATE code postgres returns for a violated
+// UNIQUE constraint. We surface these as domain-level errors so callers
+// (especially external-identity registration) can recognize a concurrent
+// duplicate and recover by re-reading the existing row.
+const pgUniqueViolation = "23505"
 
 type userRow struct {
 	ID           string    `db:"id"`
@@ -69,6 +76,10 @@ func (r *PostgresUserRepository) Save(ctx context.Context, user *domain.User) er
 		user.UpdatedAt,
 	)
 	if err != nil {
+		var pgErr *pq.Error
+		if errors.As(err, &pgErr) && string(pgErr.Code) == pgUniqueViolation {
+			return domain.ErrEmailAlreadyTaken
+		}
 		return err
 	}
 	affected, err := res.RowsAffected()
