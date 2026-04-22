@@ -42,26 +42,29 @@ func (h *Handler) require(resource, action string) func(http.Handler) http.Handl
 func (h *Handler) Routes() chi.Router {
 	r := chi.NewRouter()
 
-	r.With(h.require("roles", "create")).Post("/roles", h.handleCreateRole)
-	r.With(h.require("roles", "read")).Get("/roles", h.handleListRoles)
-	r.With(h.require("roles", "delete")).Delete("/roles/{id}", h.handleDeleteRole)
-	r.With(h.require("permissions", "grant")).Post("/roles/{id}/permissions", h.handleGrantPermission)
-	r.With(h.require("permissions", "revoke")).Delete("/roles/{id}/permissions", h.handleRevokePermission)
+	// Permission strings come from authzDomain.Resource* / Action* so a typo
+	// here surfaces as a compile error instead of a 403 at runtime, and the
+	// route table stays in sync with BuiltinPermissions seeded in authz.
+	r.With(h.require(authzDomain.ResourceRoles, authzDomain.ActionCreate)).Post("/roles", h.handleCreateRole)
+	r.With(h.require(authzDomain.ResourceRoles, authzDomain.ActionRead)).Get("/roles", h.handleListRoles)
+	r.With(h.require(authzDomain.ResourceRoles, authzDomain.ActionDelete)).Delete("/roles/{id}", h.handleDeleteRole)
+	r.With(h.require(authzDomain.ResourcePermissions, authzDomain.ActionGrant)).Post("/roles/{id}/permissions", h.handleGrantPermission)
+	r.With(h.require(authzDomain.ResourcePermissions, authzDomain.ActionRevoke)).Delete("/roles/{id}/permissions", h.handleRevokePermission)
 
-	r.With(h.require("roles", "assign")).Post("/users/{uid}/roles", h.handleAssignRole)
-	r.With(h.require("roles", "assign")).Delete("/users/{uid}/roles/{rid}", h.handleUnassignRole)
-	r.With(h.require("roles", "read")).Get("/users/{uid}/roles", h.handleListUserRoles)
+	r.With(h.require(authzDomain.ResourceRoles, authzDomain.ActionAssign)).Post("/users/{uid}/roles", h.handleAssignRole)
+	r.With(h.require(authzDomain.ResourceRoles, authzDomain.ActionAssign)).Delete("/users/{uid}/roles/{rid}", h.handleUnassignRole)
+	r.With(h.require(authzDomain.ResourceRoles, authzDomain.ActionRead)).Get("/users/{uid}/roles", h.handleListUserRoles)
 
-	r.With(h.require("permissions", "check")).Post("/check", h.handleCheckPermission)
+	r.With(h.require(authzDomain.ResourcePermissions, authzDomain.ActionCheck)).Post("/check", h.handleCheckPermission)
 
-	r.With(h.require("resources", "grant")).Post("/resources/permissions", h.handleGrantResourcePermission)
-	r.With(h.require("resources", "revoke")).Delete("/resources/permissions", h.handleRevokeResourcePermission)
-	r.With(h.require("permissions", "check")).Post("/resources/check", h.handleCheckResourcePermission)
-	r.With(h.require("resources", "read")).Get("/resources/permissions", h.handleListResourcePermissions)
+	r.With(h.require(authzDomain.ResourceResources, authzDomain.ActionGrant)).Post("/resources/permissions", h.handleGrantResourcePermission)
+	r.With(h.require(authzDomain.ResourceResources, authzDomain.ActionRevoke)).Delete("/resources/permissions", h.handleRevokeResourcePermission)
+	r.With(h.require(authzDomain.ResourcePermissions, authzDomain.ActionCheck)).Post("/resources/check", h.handleCheckResourcePermission)
+	r.With(h.require(authzDomain.ResourceResources, authzDomain.ActionRead)).Get("/resources/permissions", h.handleListResourcePermissions)
 
-	r.With(h.require("permissions", "create")).Post("/permissions", h.handleRegisterPermission)
-	r.With(h.require("permissions", "read")).Get("/permissions", h.handleListPermissionDefinitions)
-	r.With(h.require("permissions", "delete")).Delete("/permissions", h.handleDeletePermission)
+	r.With(h.require(authzDomain.ResourcePermissions, authzDomain.ActionCreate)).Post("/permissions", h.handleRegisterPermission)
+	r.With(h.require(authzDomain.ResourcePermissions, authzDomain.ActionRead)).Get("/permissions", h.handleListPermissionDefinitions)
+	r.With(h.require(authzDomain.ResourcePermissions, authzDomain.ActionDelete)).Delete("/permissions", h.handleDeletePermission)
 
 	return r
 }

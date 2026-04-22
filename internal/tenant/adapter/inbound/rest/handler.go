@@ -8,6 +8,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	// authzKeys is the canonical vocabulary for permission strings used by
+	// the Checker. Importing it from the tenant REST adapter keeps the
+	// route table and the seeded BuiltinPermissions in lockstep.
+	authzKeys "openiam/internal/authz/domain"
 	sharedAuth "openiam/internal/shared/auth"
 	"openiam/internal/tenant/application"
 	"openiam/internal/tenant/application/command"
@@ -38,17 +42,17 @@ func (h *Handler) require(resource, action string) func(http.Handler) http.Handl
 
 func (h *Handler) TenantRoutes() chi.Router {
 	r := chi.NewRouter()
-	r.With(h.require("tenants", "create")).Post("/", h.handleCreateTenant)
-	r.With(h.require("tenants", "read")).Get("/{tid}", h.handleGetTenant)
-	r.With(h.require("applications", "create")).Post("/{tid}/applications", h.handleCreateApplication)
-	r.With(h.require("applications", "read")).Get("/{tid}/applications", h.handleListApplications)
+	r.With(h.require(authzKeys.ResourceTenants, authzKeys.ActionCreate)).Post("/", h.handleCreateTenant)
+	r.With(h.require(authzKeys.ResourceTenants, authzKeys.ActionRead)).Get("/{tid}", h.handleGetTenant)
+	r.With(h.require(authzKeys.ResourceApplications, authzKeys.ActionCreate)).Post("/{tid}/applications", h.handleCreateApplication)
+	r.With(h.require(authzKeys.ResourceApplications, authzKeys.ActionRead)).Get("/{tid}/applications", h.handleListApplications)
 	return r
 }
 
 func (h *Handler) ApplicationRoutes() chi.Router {
 	r := chi.NewRouter()
-	r.With(h.require("applications", "read")).Get("/{aid}", h.handleGetApplication)
-	r.With(h.require("applications", "update")).Put("/{aid}", h.handleUpdateApplication)
+	r.With(h.require(authzKeys.ResourceApplications, authzKeys.ActionRead)).Get("/{aid}", h.handleGetApplication)
+	r.With(h.require(authzKeys.ResourceApplications, authzKeys.ActionUpdate)).Put("/{aid}", h.handleUpdateApplication)
 	return r
 }
 

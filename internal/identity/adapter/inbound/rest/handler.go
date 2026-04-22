@@ -8,11 +8,15 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	sharedAuth "openiam/internal/shared/auth"
+	// authzKeys is the canonical vocabulary for permission strings used by
+	// the Checker. Importing it from the identity REST adapter keeps the
+	// route table and the seeded BuiltinPermissions in lockstep.
+	authzKeys "openiam/internal/authz/domain"
 	"openiam/internal/identity/application"
 	"openiam/internal/identity/application/command"
 	"openiam/internal/identity/application/query"
 	"openiam/internal/identity/domain"
+	sharedAuth "openiam/internal/shared/auth"
 	shared "openiam/internal/shared/domain"
 )
 
@@ -65,9 +69,9 @@ func (h *Handler) requireOwnerOr(resource, action string) func(http.Handler) htt
 func (h *Handler) Routes() chi.Router {
 	r := chi.NewRouter()
 	r.Post("/register", h.handleRegister)
-	r.With(h.requireOwnerOr("users", "read")).Get("/{id}", h.handleGetUser)
-	r.With(h.requireOwnerOr("users", "update")).Put("/{id}/profile", h.handleUpdateProfile)
-	r.With(h.requireOwnerOr("users", "update")).Put("/{id}/password", h.handleChangePassword)
+	r.With(h.requireOwnerOr(authzKeys.ResourceUsers, authzKeys.ActionRead)).Get("/{id}", h.handleGetUser)
+	r.With(h.requireOwnerOr(authzKeys.ResourceUsers, authzKeys.ActionUpdate)).Put("/{id}/profile", h.handleUpdateProfile)
+	r.With(h.requireOwnerOr(authzKeys.ResourceUsers, authzKeys.ActionUpdate)).Put("/{id}/password", h.handleChangePassword)
 	return r
 }
 
