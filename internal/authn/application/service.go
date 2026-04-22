@@ -15,6 +15,12 @@ import (
 	shared "openiam/internal/shared/domain"
 )
 
+// SessionDTO is the public projection of an active session.
+//
+// The struct stays here (rather than under pkg/iam/authn) so the
+// authn package can keep building without a back-import cycle:
+// pkg/iam/authn aliases this type for SDK consumers, and the import
+// arrow only ever points pkg/iam/authn → internal/authn/application.
 type SessionDTO struct {
 	ID           string
 	UserID       string
