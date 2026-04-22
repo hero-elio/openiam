@@ -340,8 +340,9 @@ func TestTenantAppService_ExceptionBoundaries(t *testing.T) {
 		app.RedirectURIs = []string{"https://old/callback"}
 		app.Scopes = []string{"scope:old"}
 
+		bus := &fakeEventBus{}
 		appRepo := &fakeAppRepo{app: app}
-		svc := NewTenantAppService(&fakeTenantRepo{}, appRepo, &fakeEventBus{}, &fakeTxManager{})
+		svc := NewTenantAppService(&fakeTenantRepo{}, appRepo, bus, &fakeTxManager{})
 		err := svc.UpdateApplication(context.Background(), &command.UpdateApplication{
 			AppID: app.ID.String(),
 			Name:  "   ",
@@ -357,14 +358,50 @@ func TestTenantAppService_ExceptionBoundaries(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error for empty name(no update): %v", err)
 		}
-		if appRepo.saved.Name != "old-name" {
-			t.Fatalf("name should remain unchanged when empty name provided")
+		// No fields changed → no save, no event, original aggregate untouched.
+		if appRepo.saved != nil {
+			t.Fatalf("expected no save when nothing changed, got %+v", appRepo.saved)
 		}
-		if len(appRepo.saved.RedirectURIs) != 1 || appRepo.saved.RedirectURIs[0] != "https://old/callback" {
+		if len(bus.published) != 0 {
+			t.Fatalf("expected no event when nothing changed, got %d", len(bus.published))
+		}
+		if app.Name != "old-name" {
+			t.Fatalf("name should remain unchanged when empty name provided, got %q", app.Name)
+		}
+		if len(app.RedirectURIs) != 1 || app.RedirectURIs[0] != "https://old/callback" {
 			t.Fatalf("redirect uris should remain unchanged when nil")
 		}
-		if len(appRepo.saved.Scopes) != 1 || appRepo.saved.Scopes[0] != "scope:old" {
+		if len(app.Scopes) != 1 || app.Scopes[0] != "scope:old" {
 			t.Fatalf("scopes should remain unchanged when nil")
+		}
+	})
+
+	t.Run("update application emits ApplicationUpdated and saves", func(t *testing.T) {
+		tenantID := shared.NewTenantID()
+		app := domain.NewApplication(tenantID, "old-name", domain.GenerateClientCredentials(), shared.NewUserID())
+		// Drain the creation event so we can assert the update event in isolation.
+		_ = app.PullEvents()
+
+		bus := &fakeEventBus{}
+		appRepo := &fakeAppRepo{app: app}
+		svc := NewTenantAppService(&fakeTenantRepo{}, appRepo, bus, &fakeTxManager{})
+
+		if err := svc.UpdateApplication(context.Background(), &command.UpdateApplication{
+			AppID:        app.ID.String(),
+			Name:         "new-name",
+			RedirectURIs: []string{"https://new/cb"},
+			Scopes:       []string{"scope:new"},
+		}); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if appRepo.saved == nil || appRepo.saved.Name != "new-name" {
+			t.Fatalf("expected app saved with new name, got %+v", appRepo.saved)
+		}
+		if len(bus.published) != 1 {
+			t.Fatalf("expected one published event, got %d", len(bus.published))
+		}
+		if bus.published[0].EventName() != domain.EventApplicationUpdated {
+			t.Fatalf("expected %q event, got %q", domain.EventApplicationUpdated, bus.published[0].EventName())
 		}
 	})
 

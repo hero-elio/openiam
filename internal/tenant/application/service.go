@@ -145,17 +145,18 @@ func (s *TenantAppService) UpdateApplication(ctx context.Context, cmd *command.U
 			return err
 		}
 
-		if cmd.Name != "" {
-			app.Name = strings.TrimSpace(cmd.Name)
-		}
-		if cmd.RedirectURIs != nil {
-			app.RedirectURIs = cmd.RedirectURIs
-		}
-		if cmd.Scopes != nil {
-			app.Scopes = cmd.Scopes
+		if !app.ApplyUpdate(domain.ApplicationUpdate{
+			Name:         cmd.Name,
+			RedirectURIs: cmd.RedirectURIs,
+			Scopes:       cmd.Scopes,
+		}) {
+			return nil
 		}
 
-		return s.appRepo.Save(txCtx, app)
+		if err := s.appRepo.Save(txCtx, app); err != nil {
+			return err
+		}
+		return s.eventBus.Publish(txCtx, app.PullEvents()...)
 	})
 }
 

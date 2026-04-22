@@ -9,6 +9,7 @@ import (
 const (
 	EventTenantCreated      = "tenant.created"
 	EventApplicationCreated = "application.created"
+	EventApplicationUpdated = "application.updated"
 )
 
 type TenantCreatedEvent struct {
@@ -35,3 +36,18 @@ func (e ApplicationCreatedEvent) AggregateID() string   { return e.AppID.String(
 func (e ApplicationCreatedEvent) GetAppID() shared.AppID       { return e.AppID }
 func (e ApplicationCreatedEvent) GetTenantID() shared.TenantID { return e.TenantID }
 func (e ApplicationCreatedEvent) GetCreatedBy() shared.UserID  { return e.CreatedBy }
+
+type ApplicationUpdatedEvent struct {
+	AppID        shared.AppID
+	TenantID     shared.TenantID
+	Name         string
+	RedirectURIs []string
+	Scopes       []string
+	Timestamp    time.Time
+}
+
+func (e ApplicationUpdatedEvent) EventName() string             { return EventApplicationUpdated }
+func (e ApplicationUpdatedEvent) OccurredAt() time.Time         { return e.Timestamp }
+func (e ApplicationUpdatedEvent) AggregateID() string           { return e.AppID.String() }
+func (e ApplicationUpdatedEvent) GetAppID() shared.AppID        { return e.AppID }
+func (e ApplicationUpdatedEvent) GetTenantID() shared.TenantID  { return e.TenantID }
