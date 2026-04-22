@@ -75,6 +75,24 @@ func (s *TenantAppService) CreateTenant(ctx context.Context, cmd *command.Create
 	return tenant.ID, nil
 }
 
+func (s *TenantAppService) ListTenants(ctx context.Context, q *query.ListTenants) ([]*TenantDTO, error) {
+	filter := domain.ListTenantsFilter{}
+	if q != nil {
+		filter.Limit = q.Limit
+		filter.Offset = q.Offset
+	}
+	tenants, err := s.tenantRepo.List(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+
+	dtos := make([]*TenantDTO, 0, len(tenants))
+	for _, t := range tenants {
+		dtos = append(dtos, toTenantDTO(t))
+	}
+	return dtos, nil
+}
+
 func (s *TenantAppService) GetTenant(ctx context.Context, q *query.GetTenant) (*TenantDTO, error) {
 	t, err := s.tenantRepo.FindByID(ctx, shared.TenantID(q.TenantID))
 	if err != nil {

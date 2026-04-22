@@ -19,6 +19,7 @@ type (
 type Service interface {
 	CreateTenant(ctx context.Context, cmd *CreateTenantCommand) (TenantID, error)
 	GetTenant(ctx context.Context, q *GetTenantQuery) (*TenantDTO, error)
+	ListTenants(ctx context.Context, q *ListTenantsQuery) ([]*TenantDTO, error)
 
 	CreateApplication(ctx context.Context, cmd *CreateApplicationCommand) (*CreateApplicationResult, error)
 	GetApplication(ctx context.Context, q *GetApplicationQuery) (*ApplicationDTO, error)

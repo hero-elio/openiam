@@ -12,10 +12,13 @@ import (
 )
 
 type fakeTenantRepo struct {
-	saved  *domain.Tenant
-	tenant *domain.Tenant
-	saveErr error
-	findErr error
+	saved          *domain.Tenant
+	tenant         *domain.Tenant
+	tenants        []*domain.Tenant
+	lastListFilter domain.ListTenantsFilter
+	saveErr        error
+	findErr        error
+	listErr        error
 }
 
 func (f *fakeTenantRepo) Save(_ context.Context, t *domain.Tenant) error {
@@ -37,6 +40,14 @@ func (f *fakeTenantRepo) FindByID(_ context.Context, id shared.TenantID) (*domai
 		return f.tenant, nil
 	}
 	return nil, shared.ErrNotFound
+}
+
+func (f *fakeTenantRepo) List(_ context.Context, filter domain.ListTenantsFilter) ([]*domain.Tenant, error) {
+	f.lastListFilter = filter
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	return f.tenants, nil
 }
 
 type fakeAppRepo struct {
@@ -196,6 +207,24 @@ func TestTenantAppService_GetTenant(t *testing.T) {
 	}
 	if dto == nil || dto.ID != tenant.ID.String() || dto.Name != "acme" {
 		t.Fatalf("tenant dto mismatch")
+	}
+}
+
+func TestTenantAppService_ListTenants(t *testing.T) {
+	t1 := domain.NewTenant("acme")
+	t2 := domain.NewTenant("globex")
+	tenantRepo := &fakeTenantRepo{tenants: []*domain.Tenant{t1, t2}}
+	svc := NewTenantAppService(tenantRepo, &fakeAppRepo{}, &fakeEventBus{}, &fakeTxManager{})
+
+	got, err := svc.ListTenants(context.Background(), &query.ListTenants{Limit: 50, Offset: 10})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 tenants, got %d", len(got))
+	}
+	if tenantRepo.lastListFilter.Limit != 50 || tenantRepo.lastListFilter.Offset != 10 {
+		t.Fatalf("paging params not forwarded: %+v", tenantRepo.lastListFilter)
 	}
 }
 

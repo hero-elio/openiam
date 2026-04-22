@@ -296,6 +296,34 @@ func (s *AuthzAppService) ListRoles(ctx context.Context, q *query.ListRoles) ([]
 	return dtos, nil
 }
 
+func (s *AuthzAppService) ListRoleMembers(ctx context.Context, q *query.ListRoleMembers) ([]*UserAppRoleDTO, error) {
+	if q == nil || strings.TrimSpace(q.RoleID) == "" {
+		return nil, shared.ErrInvalidInput
+	}
+
+	roleID := shared.RoleID(q.RoleID)
+	if _, err := s.roleRepo.FindByID(ctx, roleID); err != nil {
+		return nil, err
+	}
+
+	uars, err := s.roleRepo.ListUserAppRolesByRole(ctx, roleID)
+	if err != nil {
+		return nil, err
+	}
+
+	dtos := make([]*UserAppRoleDTO, 0, len(uars))
+	for _, uar := range uars {
+		dtos = append(dtos, &UserAppRoleDTO{
+			UserID:     uar.UserID.String(),
+			AppID:      uar.AppID.String(),
+			RoleID:     uar.RoleID.String(),
+			TenantID:   uar.TenantID.String(),
+			AssignedAt: uar.AssignedAt.Format(time.RFC3339),
+		})
+	}
+	return dtos, nil
+}
+
 func (s *AuthzAppService) ListUserRoles(ctx context.Context, q *query.ListUserRoles) ([]*UserAppRoleDTO, error) {
 	uars, err := s.roleRepo.FindUserAppRoles(ctx, shared.UserID(q.UserID), shared.AppID(q.AppID))
 	if err != nil {

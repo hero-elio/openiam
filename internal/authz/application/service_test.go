@@ -3,17 +3,20 @@ package application
 import (
 	"context"
 	"testing"
+	"time"
 
 	"openiam/internal/authz/application/command"
+	"openiam/internal/authz/application/query"
 	"openiam/internal/authz/domain"
 	shared "openiam/internal/shared/domain"
 )
 
 type fakeRoleRepo struct {
-	role           *domain.Role
-	findByIDErr    error
-	userAssignments []*domain.UserAppRole
-	saveCalled     bool
+	role             *domain.Role
+	findByIDErr      error
+	userAssignments  []*domain.UserAppRole
+	roleAssignments  []*domain.UserAppRole
+	saveCalled       bool
 }
 
 func (f *fakeRoleRepo) Save(context.Context, *domain.Role) error { return nil }
@@ -50,6 +53,10 @@ func (f *fakeRoleRepo) DeleteUserAppRole(context.Context, shared.UserID, shared.
 
 func (f *fakeRoleRepo) FindUserAppRoles(context.Context, shared.UserID, shared.AppID) ([]*domain.UserAppRole, error) {
 	return f.userAssignments, nil
+}
+
+func (f *fakeRoleRepo) ListUserAppRolesByRole(context.Context, shared.RoleID) ([]*domain.UserAppRole, error) {
+	return f.roleAssignments, nil
 }
 
 type fakeEventBus struct {
@@ -147,6 +154,47 @@ func TestAssignRole_InvalidInput(t *testing.T) {
 	})
 	if err != shared.ErrInvalidInput {
 		t.Fatalf("unexpected error: got %v want %v", err, shared.ErrInvalidInput)
+	}
+}
+
+func TestListRoleMembers(t *testing.T) {
+	appID := shared.NewAppID()
+	tenantID := shared.NewTenantID()
+	role := domain.NewRole(appID, tenantID, "reviewer", "")
+	now := time.Now()
+
+	repo := &fakeRoleRepo{
+		role: role,
+		roleAssignments: []*domain.UserAppRole{
+			{UserID: shared.NewUserID(), AppID: appID, RoleID: role.ID, TenantID: tenantID, AssignedAt: now},
+			{UserID: shared.NewUserID(), AppID: appID, RoleID: role.ID, TenantID: tenantID, AssignedAt: now},
+		},
+	}
+	svc := &AuthzAppService{
+		roleRepo:  repo,
+		eventBus:  &fakeEventBus{},
+		txManager: &fakeTx{},
+	}
+
+	got, err := svc.ListRoleMembers(context.Background(), &query.ListRoleMembers{RoleID: role.ID.String()})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 members, got %d", len(got))
+	}
+	if got[0].RoleID != role.ID.String() {
+		t.Fatalf("unexpected role id: %v", got[0].RoleID)
+	}
+
+	if _, err := svc.ListRoleMembers(context.Background(), &query.ListRoleMembers{RoleID: " "}); err != shared.ErrInvalidInput {
+		t.Fatalf("expected invalid input, got %v", err)
+	}
+
+	missingRepo := &fakeRoleRepo{findByIDErr: domain.ErrRoleNotFound}
+	missingSvc := &AuthzAppService{roleRepo: missingRepo, eventBus: &fakeEventBus{}, txManager: &fakeTx{}}
+	if _, err := missingSvc.ListRoleMembers(context.Background(), &query.ListRoleMembers{RoleID: "x"}); err != domain.ErrRoleNotFound {
+		t.Fatalf("expected role not found, got %v", err)
 	}
 }
 

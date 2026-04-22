@@ -312,6 +312,30 @@ func (r *PostgresRoleRepository) FindUserAppRoles(ctx context.Context, userID sh
 	return uars, nil
 }
 
+func (r *PostgresRoleRepository) ListUserAppRolesByRole(ctx context.Context, roleID shared.RoleID) ([]*domain.UserAppRole, error) {
+	conn := sharedPersistence.Conn(ctx, r.db)
+
+	var rows []userAppRoleRow
+	err := sqlx.SelectContext(ctx, conn, &rows,
+		`SELECT * FROM user_app_roles WHERE role_id = $1 ORDER BY assigned_at DESC`,
+		roleID.String())
+	if err != nil {
+		return nil, err
+	}
+
+	uars := make([]*domain.UserAppRole, 0, len(rows))
+	for _, row := range rows {
+		uars = append(uars, &domain.UserAppRole{
+			UserID:     shared.UserID(row.UserID),
+			AppID:      shared.AppID(row.AppID),
+			RoleID:     shared.RoleID(row.RoleID),
+			TenantID:   shared.TenantID(row.TenantID),
+			AssignedAt: row.AssignedAt,
+		})
+	}
+	return uars, nil
+}
+
 func (r *PostgresRoleRepository) loadPermissions(ctx context.Context, conn sqlx.ExtContext, roleID string) ([]domain.Permission, error) {
 	var rows []permissionRow
 	err := sqlx.SelectContext(ctx, conn, &rows,

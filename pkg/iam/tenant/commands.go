@@ -14,4 +14,5 @@ type (
 	GetTenantQuery        = query.GetTenant
 	GetApplicationQuery   = query.GetApplication
 	ListApplicationsQuery = query.ListApplications
+	ListTenantsQuery      = query.ListTenants
 )

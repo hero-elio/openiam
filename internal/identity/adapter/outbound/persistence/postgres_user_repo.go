@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -121,6 +123,44 @@ func (r *PostgresUserRepository) FindByEmail(ctx context.Context, tenantID share
 		return nil, err
 	}
 	return rowToUser(row), nil
+}
+
+func (r *PostgresUserRepository) List(ctx context.Context, filter domain.ListUsersFilter) ([]*domain.User, error) {
+	conn := sharedPersistence.Conn(ctx, r.db)
+
+	query := `SELECT * FROM users`
+	args := make([]any, 0, 4)
+	conds := make([]string, 0, 2)
+	if !filter.TenantID.IsEmpty() {
+		args = append(args, filter.TenantID.String())
+		conds = append(conds, "tenant_id = $"+strconv.Itoa(len(args)))
+	}
+	if filter.EmailLike != "" {
+		args = append(args, filter.EmailLike)
+		conds = append(conds, "email ILIKE $"+strconv.Itoa(len(args)))
+	}
+	if len(conds) > 0 {
+		query += " WHERE " + strings.Join(conds, " AND ")
+	}
+	query += " ORDER BY created_at DESC"
+	if filter.Limit > 0 {
+		args = append(args, filter.Limit)
+		query += " LIMIT $" + strconv.Itoa(len(args))
+	}
+	if filter.Offset > 0 {
+		args = append(args, filter.Offset)
+		query += " OFFSET $" + strconv.Itoa(len(args))
+	}
+
+	var rows []userRow
+	if err := sqlx.SelectContext(ctx, conn, &rows, query, args...); err != nil {
+		return nil, err
+	}
+	out := make([]*domain.User, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, rowToUser(row))
+	}
+	return out, nil
 }
 
 func (r *PostgresUserRepository) ExistsByEmail(ctx context.Context, tenantID shared.TenantID, email domain.Email) (bool, error) {

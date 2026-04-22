@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 
@@ -19,6 +20,7 @@ import (
 const (
 	TenantEndpointCreateTenant      = "tenant.create"
 	TenantEndpointGetTenant         = "tenant.get"
+	TenantEndpointListTenants       = "tenant.list"
 	TenantEndpointCreateApplication = "tenant.application.create"
 	TenantEndpointListApplications  = "tenant.application.list"
 
@@ -31,6 +33,7 @@ const (
 // Default route layout (relative to r):
 //
 //	POST /                       create tenant
+//	GET  /                       list tenants (paged via ?limit & ?offset)
 //	GET  /{tid}                  fetch tenant
 //	POST /{tid}/applications     create application under tenant
 //	GET  /{tid}/applications     list applications under tenant
@@ -50,6 +53,10 @@ func MountTenant(r chi.Router, svc tenant.Service, check sharedauth.Checker, opt
 		if !cfg.skipped(TenantEndpointCreateTenant) {
 			target.With(RequirePermission(check, tenant.ResourceTenants, tenant.ActionCreate)).
 				Post("/", tenantHandleCreateTenant(svc))
+		}
+		if !cfg.skipped(TenantEndpointListTenants) {
+			target.With(RequirePermission(check, tenant.ResourceTenants, tenant.ActionRead)).
+				Get("/", tenantHandleListTenants(svc))
 		}
 		if !cfg.skipped(TenantEndpointGetTenant) {
 			target.With(RequirePermission(check, tenant.ResourceTenants, tenant.ActionRead)).
@@ -163,6 +170,34 @@ func tenantHandleCreateTenant(svc tenant.Service) http.HandlerFunc {
 		}
 
 		writeJSON(w, http.StatusCreated, map[string]string{"id": tenantID.String()})
+	}
+}
+
+func tenantHandleListTenants(svc tenant.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+		offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+
+		dtos, err := svc.ListTenants(r.Context(), &tenant.ListTenantsQuery{
+			Limit:  limit,
+			Offset: offset,
+		})
+		if err != nil {
+			writeTenantBusinessError(w, err)
+			return
+		}
+
+		resp := make([]TenantResponse, 0, len(dtos))
+		for _, dto := range dtos {
+			resp = append(resp, TenantResponse{
+				ID:        dto.ID,
+				Name:      dto.Name,
+				Status:    dto.Status,
+				CreatedAt: dto.CreatedAt,
+			})
+		}
+
+		writeJSON(w, http.StatusOK, resp)
 	}
 }
 

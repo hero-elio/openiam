@@ -154,6 +154,25 @@ func (s *IdentityService) RegisterExternalUser(ctx context.Context, cmd *command
 	return resolvedID, nil
 }
 
+func (s *IdentityService) ListUsers(ctx context.Context, q *query.ListUsers) ([]*UserDTO, error) {
+	filter := domain.ListUsersFilter{}
+	if q != nil {
+		filter.TenantID = shared.TenantID(q.TenantID)
+		filter.EmailLike = q.EmailLike
+		filter.Limit = q.Limit
+		filter.Offset = q.Offset
+	}
+	users, err := s.userRepo.List(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	dtos := make([]*UserDTO, 0, len(users))
+	for _, u := range users {
+		dtos = append(dtos, toUserDTO(u))
+	}
+	return dtos, nil
+}
+
 func (s *IdentityService) GetUser(ctx context.Context, q *query.GetUser) (*UserDTO, error) {
 	user, err := s.userRepo.FindByID(ctx, shared.UserID(q.UserID))
 	if err != nil {

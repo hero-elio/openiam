@@ -35,6 +35,7 @@ Thumbs.db
 .env.*
 config/config.yaml
 config/config.local.yaml
+/config.yaml
 
 # Docker data
 deploy/docker/data/
@@ -46,6 +47,16 @@ bin/
 # Frontend
 web/authn-test/node_modules/
 web/authn-test/dist/
+web/admin/node_modules/
+web/admin/dist/
 
-# AI design docs
-docs/ai/
+# tsc / vite build byproducts that get regenerated locally
+web/admin/*.tsbuildinfo
+web/admin/vite.config.js
+web/admin/vite.config.d.ts
+
+# Stray binaries built at repo root (e.g. `go build ./cmd/iam-bootstrap`)
+/iam-bootstrap
+/iam-server
+
+

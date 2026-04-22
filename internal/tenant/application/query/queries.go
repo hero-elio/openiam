@@ -11,3 +11,8 @@ type GetApplication struct {
 type ListApplications struct {
 	TenantID string
 }
+
+type ListTenants struct {
+	Limit  int
+	Offset int
+}

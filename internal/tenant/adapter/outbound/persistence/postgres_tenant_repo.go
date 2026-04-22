@@ -44,6 +44,55 @@ func (r *PostgresTenantRepository) Save(ctx context.Context, t *domain.Tenant) e
 	return err
 }
 
+func (r *PostgresTenantRepository) List(ctx context.Context, filter domain.ListTenantsFilter) ([]*domain.Tenant, error) {
+	conn := sharedPersistence.Conn(ctx, r.db)
+
+	const baseQuery = `SELECT id, name, status, created_at FROM tenants ORDER BY created_at DESC`
+
+	limit := filter.Limit
+	offset := filter.Offset
+	if limit < 0 {
+		limit = 0
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	var rows []tenantRow
+	switch {
+	case limit > 0 && offset > 0:
+		err := sqlx.SelectContext(ctx, conn, &rows, baseQuery+` LIMIT $1 OFFSET $2`, limit, offset)
+		if err != nil {
+			return nil, err
+		}
+	case limit > 0:
+		err := sqlx.SelectContext(ctx, conn, &rows, baseQuery+` LIMIT $1`, limit)
+		if err != nil {
+			return nil, err
+		}
+	case offset > 0:
+		err := sqlx.SelectContext(ctx, conn, &rows, baseQuery+` OFFSET $1`, offset)
+		if err != nil {
+			return nil, err
+		}
+	default:
+		if err := sqlx.SelectContext(ctx, conn, &rows, baseQuery); err != nil {
+			return nil, err
+		}
+	}
+
+	out := make([]*domain.Tenant, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, &domain.Tenant{
+			ID:        shared.TenantID(row.ID),
+			Name:      row.Name,
+			Status:    row.Status,
+			CreatedAt: row.CreatedAt,
+		})
+	}
+	return out, nil
+}
+
 func (r *PostgresTenantRepository) FindByID(ctx context.Context, id shared.TenantID) (*domain.Tenant, error) {
 	conn := sharedPersistence.Conn(ctx, r.db)
 

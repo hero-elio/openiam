@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"sort"
 	"strings"
 	"sync"
 
@@ -50,6 +51,39 @@ func (s *UserStore) FindByEmail(_ context.Context, tenantID shared.TenantID, ema
 		}
 	}
 	return nil, identityDomain.ErrUserNotFound
+}
+
+func (s *UserStore) List(_ context.Context, filter identityDomain.ListUsersFilter) ([]*identityDomain.User, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	likeNeedle := strings.ToLower(strings.Trim(filter.EmailLike, "%"))
+
+	matched := make([]*identityDomain.User, 0, len(s.users))
+	for _, user := range s.users {
+		if !filter.TenantID.IsEmpty() && user.TenantID != filter.TenantID {
+			continue
+		}
+		if likeNeedle != "" && !strings.Contains(strings.ToLower(user.Email.String()), likeNeedle) {
+			continue
+		}
+		matched = append(matched, copyUser(user))
+	}
+
+	sort.Slice(matched, func(i, j int) bool {
+		return matched[i].CreatedAt.After(matched[j].CreatedAt)
+	})
+
+	if filter.Offset > 0 {
+		if filter.Offset >= len(matched) {
+			return []*identityDomain.User{}, nil
+		}
+		matched = matched[filter.Offset:]
+	}
+	if filter.Limit > 0 && filter.Limit < len(matched) {
+		matched = matched[:filter.Limit]
+	}
+	return matched, nil
 }
 
 func (s *UserStore) ExistsByEmail(_ context.Context, tenantID shared.TenantID, email identityDomain.Email) (bool, error) {

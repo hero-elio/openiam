@@ -77,6 +77,10 @@ func (f *fakeRoleRepo) FindUserAppRoles(context.Context, shared.UserID, shared.A
 	return nil, nil
 }
 
+func (f *fakeRoleRepo) ListUserAppRolesByRole(context.Context, shared.RoleID) ([]*authzDomain.UserAppRole, error) {
+	return nil, nil
+}
+
 type fakeTemplateProvider struct {
 	roles []*authzDomain.Role
 	err   error

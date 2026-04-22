@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 
@@ -17,6 +18,7 @@ import (
 // Endpoint names accepted by SkipEndpoints for MountIdentity.
 const (
 	IdentityEndpointRegister       = "register"
+	IdentityEndpointListUsers      = "user.list"
 	IdentityEndpointGetUser        = "user.get"
 	IdentityEndpointUpdateProfile  = "user.profile.update"
 	IdentityEndpointChangePassword = "user.password.change"
@@ -46,6 +48,10 @@ func MountIdentity(r chi.Router, svc identity.Service, check sharedauth.Checker,
 
 		if !cfg.skipped(IdentityEndpointRegister) {
 			target.Post("/register", identityHandleRegister(svc))
+		}
+		if !cfg.skipped(IdentityEndpointListUsers) {
+			target.With(RequirePermission(check, identity.ResourceUsers, identity.ActionRead)).
+				Get("/", identityHandleListUsers(svc))
 		}
 		if !cfg.skipped(IdentityEndpointGetUser) {
 			target.With(requireOwnerOr(check, identity.ResourceUsers, identity.ActionRead)).
@@ -157,6 +163,40 @@ func identityHandleRegister(svc identity.Service) http.HandlerFunc {
 		}
 
 		writeJSON(w, http.StatusCreated, map[string]string{"id": userID.String()})
+	}
+}
+
+func identityHandleListUsers(svc identity.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		limit, _ := strconv.Atoi(q.Get("limit"))
+		offset, _ := strconv.Atoi(q.Get("offset"))
+
+		dtos, err := svc.ListUsers(r.Context(), &identity.ListUsersQuery{
+			TenantID:  q.Get("tenant_id"),
+			EmailLike: q.Get("email_like"),
+			Limit:     limit,
+			Offset:    offset,
+		})
+		if err != nil {
+			writeIdentityBusinessError(w, err)
+			return
+		}
+
+		resp := make([]IdentityUserResponse, 0, len(dtos))
+		for _, dto := range dtos {
+			resp = append(resp, IdentityUserResponse{
+				ID:          dto.ID,
+				Email:       dto.Email,
+				DisplayName: dto.DisplayName,
+				AvatarURL:   dto.AvatarURL,
+				Status:      dto.Status,
+				TenantID:    dto.TenantID,
+				CreatedAt:   dto.CreatedAt,
+			})
+		}
+
+		writeJSON(w, http.StatusOK, resp)
 	}
 }
 

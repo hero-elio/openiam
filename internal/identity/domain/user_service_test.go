@@ -28,6 +28,10 @@ func (f *fakeUserRepo) ExistsByEmail(context.Context, shared.TenantID, Email) (b
 	return f.exists, nil
 }
 
+func (f *fakeUserRepo) List(context.Context, ListUsersFilter) ([]*User, error) {
+	return nil, nil
+}
+
 func TestUserDomainService_CheckEmailUniqueness(t *testing.T) {
 	email := NewEmailFromTrusted("alice@example.com")
 	tenantID := shared.NewTenantID()

@@ -42,6 +42,10 @@ func (f *fakeRoleRepo) FindUserAppRoles(context.Context, shared.UserID, shared.A
 	return nil, nil
 }
 
+func (f *fakeRoleRepo) ListUserAppRolesByRole(context.Context, shared.RoleID) ([]*UserAppRole, error) {
+	return nil, nil
+}
+
 type fakeResourcePermRepo struct {
 	allowed bool
 	err     error

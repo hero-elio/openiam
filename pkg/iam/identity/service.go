@@ -29,6 +29,10 @@ type Service interface {
 	// GetUser reads a single user by id.
 	GetUser(ctx context.Context, q *GetUserQuery) (*UserDTO, error)
 
+	// ListUsers returns a paged user listing optionally filtered by
+	// tenant and email.
+	ListUsers(ctx context.Context, q *ListUsersQuery) ([]*UserDTO, error)
+
 	// UserExists is a cheap "is this id known?" check used by other
 	// modules (e.g. authz pre-checks before assigning a role).
 	UserExists(ctx context.Context, id UserID) (bool, error)

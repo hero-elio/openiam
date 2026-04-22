@@ -45,6 +45,7 @@ import (
 	"openiam/pkg/iam/authz"
 	"openiam/pkg/iam/eventbus"
 	"openiam/pkg/iam/identity"
+	"openiam/pkg/iam/internal/adminpage"
 	"openiam/pkg/iam/internal/testpage"
 	"openiam/pkg/iam/tenant"
 	transportRest "openiam/pkg/iam/transport/rest"
@@ -489,6 +490,7 @@ func (e *Engine) Handler() http.Handler {
 				transportRest.MountAuthn(auth, e.Authn.Service)
 			})
 			r.Mount("/__test/authn", http.StripPrefix("/__test/authn", testpage.Handler()))
+			r.Mount("/__admin", http.StripPrefix("/__admin", adminpage.Handler()))
 		}
 
 		api.Group(func(protected chi.Router) {

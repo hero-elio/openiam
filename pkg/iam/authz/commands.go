@@ -20,6 +20,7 @@ type (
 	CheckResourcePermissionQuery = query.CheckResourcePermission
 	ListRolesQuery               = query.ListRoles
 	ListUserRolesQuery           = query.ListUserRoles
+	ListRoleMembersQuery         = query.ListRoleMembers
 	ListResourcePermissionsQuery = query.ListResourcePermissions
 	ListPermissionDefinitionsQuery = query.ListPermissionDefinitions
 )

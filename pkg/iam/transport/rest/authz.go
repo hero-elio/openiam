@@ -24,6 +24,7 @@ const (
 	AuthzEndpointAssignRole         = "user.role.assign"
 	AuthzEndpointUnassignRole       = "user.role.unassign"
 	AuthzEndpointListUserRoles      = "user.role.list"
+	AuthzEndpointListRoleMembers    = "role.member.list"
 	AuthzEndpointCheckPermission    = "permission.check"
 	AuthzEndpointGrantResource      = "resource.permission.grant"
 	AuthzEndpointRevokeResource     = "resource.permission.revoke"
@@ -46,6 +47,7 @@ const (
 //	POST   /users/{uid}/roles
 //	DELETE /users/{uid}/roles/{rid}
 //	GET    /users/{uid}/roles
+//	GET    /roles/{id}/users
 //	POST   /check
 //	POST   /resources/permissions
 //	DELETE /resources/permissions
@@ -97,6 +99,10 @@ func MountAuthz(r chi.Router, svc authz.Service, check sharedauth.Checker, opts 
 		if !cfg.skipped(AuthzEndpointListUserRoles) {
 			target.With(RequirePermission(check, authz.ResourceRoles, authz.ActionRead)).
 				Get("/users/{uid}/roles", authzHandleListUserRoles(svc))
+		}
+		if !cfg.skipped(AuthzEndpointListRoleMembers) {
+			target.With(RequirePermission(check, authz.ResourceRoles, authz.ActionRead)).
+				Get("/roles/{id}/users", authzHandleListRoleMembers(svc))
 		}
 		if !cfg.skipped(AuthzEndpointCheckPermission) {
 			target.With(RequirePermission(check, authz.ResourcePermissions, authz.ActionCheck)).
@@ -449,6 +455,31 @@ func authzHandleListUserRoles(svc authz.Service) http.HandlerFunc {
 		}
 
 		dtos, err := svc.ListUserRoles(r.Context(), &authz.ListUserRolesQuery{UserID: uid, AppID: appID})
+		if err != nil {
+			writeAuthzBusinessError(w, err)
+			return
+		}
+
+		resp := make([]AuthzUserAppRoleResponse, 0, len(dtos))
+		for _, d := range dtos {
+			resp = append(resp, AuthzUserAppRoleResponse{
+				UserID:     d.UserID,
+				AppID:      d.AppID,
+				RoleID:     d.RoleID,
+				TenantID:   d.TenantID,
+				AssignedAt: d.AssignedAt,
+			})
+		}
+
+		writeJSON(w, http.StatusOK, resp)
+	}
+}
+
+func authzHandleListRoleMembers(svc authz.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		roleID := chi.URLParam(r, "id")
+
+		dtos, err := svc.ListRoleMembers(r.Context(), &authz.ListRoleMembersQuery{RoleID: roleID})
 		if err != nil {
 			writeAuthzBusinessError(w, err)
 			return

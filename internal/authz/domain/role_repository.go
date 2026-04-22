@@ -20,6 +20,10 @@ type RoleRepository interface {
 	// idempotent (e.g. avoid emitting an Unassigned event for a no-op).
 	DeleteUserAppRole(ctx context.Context, userID shared.UserID, appID shared.AppID, roleID shared.RoleID) (bool, error)
 	FindUserAppRoles(ctx context.Context, userID shared.UserID, appID shared.AppID) ([]*UserAppRole, error)
+	// ListUserAppRolesByRole returns every (user, app, role, tenant)
+	// assignment row that points at roleID. Used by admin tooling to
+	// answer "who has this role?" without joining identity.
+	ListUserAppRolesByRole(ctx context.Context, roleID shared.RoleID) ([]*UserAppRole, error)
 }
 
 // RoleTemplateProvider resolves template roles used to seed a new application.

@@ -8,3 +8,7 @@ type ListUserRoles struct {
 	UserID string
 	AppID  string
 }
+
+type ListRoleMembers struct {
+	RoleID string
+}

@@ -28,6 +28,7 @@ type Service interface {
 	AssignRole(ctx context.Context, cmd *AssignRoleCommand) error
 	UnassignRole(ctx context.Context, userID, appID, roleID string) error
 	ListUserRoles(ctx context.Context, q *ListUserRolesQuery) ([]*UserAppRoleDTO, error)
+	ListRoleMembers(ctx context.Context, q *ListRoleMembersQuery) ([]*UserAppRoleDTO, error)
 
 	// --- Role permissions ---
 	GrantPermission(ctx context.Context, cmd *GrantPermissionCommand) error

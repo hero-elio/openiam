@@ -12,10 +12,12 @@ import (
 )
 
 type fakeUserRepo struct {
-	existsByEmail bool
-	saved         *domain.User
-	findByEmail   *domain.User
-	findByID      *domain.User
+	existsByEmail  bool
+	saved          *domain.User
+	findByEmail    *domain.User
+	findByID       *domain.User
+	listResult     []*domain.User
+	lastListFilter domain.ListUsersFilter
 }
 
 func (f *fakeUserRepo) Save(_ context.Context, user *domain.User) error {
@@ -39,6 +41,11 @@ func (f *fakeUserRepo) FindByEmail(context.Context, shared.TenantID, domain.Emai
 
 func (f *fakeUserRepo) ExistsByEmail(context.Context, shared.TenantID, domain.Email) (bool, error) {
 	return f.existsByEmail, nil
+}
+
+func (f *fakeUserRepo) List(_ context.Context, filter domain.ListUsersFilter) ([]*domain.User, error) {
+	f.lastListFilter = filter
+	return f.listResult, nil
 }
 
 type fakeEventBus struct {
@@ -257,5 +264,34 @@ func TestIdentityService_GetUserAndFindByEmail(t *testing.T) {
 	}
 	if byEmail == nil || byEmail.ID != user.ID.String() {
 		t.Fatalf("find by email dto mismatch")
+	}
+}
+
+func TestIdentityService_ListUsers(t *testing.T) {
+	tenantID := shared.NewTenantID()
+	appID := shared.NewAppID()
+	u1, _ := domain.NewUser(domain.NewEmailFromTrusted("a@example.com"), "password123", tenantID, appID, "password")
+	u2, _ := domain.NewUser(domain.NewEmailFromTrusted("b@example.com"), "password123", tenantID, appID, "password")
+
+	repo := &fakeUserRepo{listResult: []*domain.User{u1, u2}}
+	svc := NewIdentityService(repo, &fakeEventBus{}, &fakeTxManager{})
+
+	got, err := svc.ListUsers(context.Background(), &query.ListUsers{
+		TenantID:  tenantID.String(),
+		EmailLike: "%example%",
+		Limit:     10,
+		Offset:    20,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 users, got %d", len(got))
+	}
+	if repo.lastListFilter.TenantID != tenantID ||
+		repo.lastListFilter.EmailLike != "%example%" ||
+		repo.lastListFilter.Limit != 10 ||
+		repo.lastListFilter.Offset != 20 {
+		t.Fatalf("filter not forwarded: %+v", repo.lastListFilter)
 	}
 }
