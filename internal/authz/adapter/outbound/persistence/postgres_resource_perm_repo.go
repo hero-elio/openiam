@@ -2,6 +2,7 @@ package persistence
 
 import (
 	"context"
+	"database/sql"
 	"time"
 
 	"github.com/google/uuid"
@@ -13,15 +14,19 @@ import (
 )
 
 type resourcePermRow struct {
-	ID           string    `db:"id"`
-	UserID       string    `db:"user_id"`
-	AppID        string    `db:"app_id"`
-	TenantID     string    `db:"tenant_id"`
-	ResourceType string    `db:"resource_type"`
-	ResourceID   string    `db:"resource_id"`
-	Action       string    `db:"action"`
-	GrantedAt    time.Time `db:"granted_at"`
-	GrantedBy    string    `db:"granted_by"`
+	ID           string         `db:"id"`
+	UserID       string         `db:"user_id"`
+	AppID        string         `db:"app_id"`
+	TenantID     string         `db:"tenant_id"`
+	ResourceType string         `db:"resource_type"`
+	ResourceID   string         `db:"resource_id"`
+	Action       string         `db:"action"`
+	GrantedAt    time.Time      `db:"granted_at"`
+	// granted_by is nullable in the schema (a system grant has no
+	// originating user), so we must scan into NullString — a bare string
+	// would explode on NULL. Empty domain UserID maps cleanly to NULL via
+	// nullStringFromID.
+	GrantedBy sql.NullString `db:"granted_by"`
 }
 
 type PostgresResourcePermissionRepository struct {
@@ -53,9 +58,19 @@ func (r *PostgresResourcePermissionRepository) Save(ctx context.Context, rp *dom
 		rp.ResourceID,
 		rp.Action,
 		rp.GrantedAt,
-		rp.GrantedBy.String(),
+		nullStringFromID(rp.GrantedBy),
 	)
 	return err
+}
+
+// nullStringFromID returns SQL NULL for an empty UserID so we don't
+// stuff the literal string "" into a column that other code expects to
+// be NULL when no granter is recorded.
+func nullStringFromID(id shared.UserID) sql.NullString {
+	if id.IsEmpty() {
+		return sql.NullString{}
+	}
+	return sql.NullString{String: id.String(), Valid: true}
 }
 
 func (r *PostgresResourcePermissionRepository) Delete(ctx context.Context, userID shared.UserID, appID shared.AppID, resourceType, resourceID, action string) error {
@@ -111,6 +126,10 @@ func (r *PostgresResourcePermissionRepository) ListByUser(ctx context.Context, u
 func rowsToResourcePerms(rows []resourcePermRow) []*domain.ResourcePermission {
 	result := make([]*domain.ResourcePermission, 0, len(rows))
 	for _, row := range rows {
+		var granter shared.UserID
+		if row.GrantedBy.Valid {
+			granter = shared.UserID(row.GrantedBy.String)
+		}
 		result = append(result, &domain.ResourcePermission{
 			ID:           row.ID,
 			UserID:       shared.UserID(row.UserID),
@@ -120,7 +139,7 @@ func rowsToResourcePerms(rows []resourcePermRow) []*domain.ResourcePermission {
 			ResourceID:   row.ResourceID,
 			Action:       row.Action,
 			GrantedAt:    row.GrantedAt,
-			GrantedBy:    shared.UserID(row.GrantedBy),
+			GrantedBy:    granter,
 		})
 	}
 	return result
