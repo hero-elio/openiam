@@ -327,7 +327,16 @@ func (e *Engine) ensureDefaults() {
 		e.Deps.Logger = slog.Default()
 	}
 	if e.Deps.EventBus == nil {
-		e.Deps.EventBus = eventbus.NewMemoryEventBus(e.Deps.Logger)
+		// When a database is configured, default to the transactional
+		// outbox bus: every event is durably recorded in domain_events
+		// inside the caller's tx, then dispatched in-process. Without
+		// a DB (tests, embedded use) we fall back to the in-memory bus
+		// so callers don't need to wire anything extra.
+		if e.Deps.DB != nil {
+			e.Deps.EventBus = eventbus.NewOutboxEventBus(e.Deps.DB, e.Deps.Logger)
+		} else {
+			e.Deps.EventBus = eventbus.NewMemoryEventBus(e.Deps.Logger)
+		}
 	}
 }
 
