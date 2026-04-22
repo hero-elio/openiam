@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -314,6 +315,11 @@ func writeError(w http.ResponseWriter, status int, code, message string) {
 }
 
 func writeBusinessError(w http.ResponseWriter, err error) {
+	var rl *domain.RateLimitedError
+	if errors.As(err, &rl) {
+		writeRateLimited(w, rl.RetryAfter)
+		return
+	}
 	switch {
 	case errors.Is(err, domain.ErrInvalidCredential), errors.Is(err, identityDomain.ErrInvalidPassword):
 		writeError(w, http.StatusUnauthorized, "invalid_credentials", "invalid credentials")
@@ -350,6 +356,18 @@ func writeBusinessError(w http.ResponseWriter, err error) {
 	default:
 		writeError(w, http.StatusInternalServerError, "internal_error", "an internal error occurred")
 	}
+}
+
+// writeRateLimited maps a domain.RateLimitedError into HTTP 429. The
+// throttling policy itself (which buckets to check, how big they are)
+// lives in AuthnAppService so that gRPC / RPC adapters get the same
+// guarantees without re-implementing it.
+func writeRateLimited(w http.ResponseWriter, retryAfter time.Duration) {
+	if retryAfter <= 0 {
+		retryAfter = application.DefaultLoginRateWindow
+	}
+	w.Header().Set("Retry-After", strconv.Itoa(int(retryAfter.Seconds())))
+	writeError(w, http.StatusTooManyRequests, "rate_limited", "too many login attempts; please retry later")
 }
 
 func extractBearerToken(r *http.Request) string {

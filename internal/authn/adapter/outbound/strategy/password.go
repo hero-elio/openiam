@@ -3,6 +3,7 @@ package strategy
 import (
 	"context"
 	"encoding/json"
+	"strings"
 
 	"github.com/alexedwards/argon2id"
 
@@ -30,6 +31,16 @@ func NewPasswordStrategy(credRepo domain.CredentialRepository, userProvider doma
 
 func (s *PasswordStrategy) Type() domain.CredentialType {
 	return domain.CredentialPassword
+}
+
+// Subject returns the normalized email so per-account throttling treats
+// "Alice@x" and "alice@x" as the same target.
+func (s *PasswordStrategy) Subject(params json.RawMessage) string {
+	var p passwordParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return ""
+	}
+	return strings.ToLower(strings.TrimSpace(p.Email))
 }
 
 func (s *PasswordStrategy) Authenticate(ctx context.Context, req *domain.AuthnRequest) (*domain.AuthnResult, error) {

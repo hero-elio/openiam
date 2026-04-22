@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"strings"
 	"time"
 
 	"openiam/internal/authn/domain"
@@ -52,6 +53,16 @@ func NewSMSStrategy(credRepo domain.CredentialRepository, userProvider domain.Us
 
 func (s *SMSStrategy) Type() domain.CredentialType {
 	return domain.CredentialSMS
+}
+
+// Subject returns the trimmed phone number so per-account throttling
+// targets the recipient regardless of how the params were formatted.
+func (s *SMSStrategy) Subject(params json.RawMessage) string {
+	var p smsVerifyParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(p.Phone)
 }
 
 func (s *SMSStrategy) Challenge(ctx context.Context, req *domain.ChallengeRequest) (*domain.ChallengeResponse, error) {

@@ -38,7 +38,23 @@ type AuthnAppService struct {
 	userInfo      domain.UserInfoProvider
 	sessionTTL    time.Duration
 	logger        *slog.Logger
+
+	// Login throttling. The defaults are conservative — they're meant to
+	// slow down credential stuffing, not to throttle a normal interactive
+	// client. Override via WithLoginRateLimit if a deployment needs
+	// different numbers.
+	loginLimiter        domain.RateLimiter
+	loginAttemptsBudget int
+	loginRateWindow     time.Duration
 }
+
+// DefaultLoginAttemptsPerWindow / DefaultLoginRateWindow are the budget
+// applied when no override is supplied via options. See the Login method
+// for how these are scoped (per-IP and per-app/provider/subject).
+const (
+	DefaultLoginAttemptsPerWindow = 5
+	DefaultLoginRateWindow        = time.Minute
+)
 
 func NewAuthnAppService(
 	sessionRepo domain.SessionRepository,
@@ -52,12 +68,15 @@ func NewAuthnAppService(
 		logger = slog.Default()
 	}
 	svc := &AuthnAppService{
-		strategies:    make(map[domain.CredentialType]domain.AuthnStrategy),
-		sessionRepo:   sessionRepo,
-		tokenProvider: tokenProvider,
-		eventBus:      eventBus,
-		sessionTTL:    sessionTTL,
-		logger:        logger,
+		strategies:          make(map[domain.CredentialType]domain.AuthnStrategy),
+		sessionRepo:         sessionRepo,
+		tokenProvider:       tokenProvider,
+		eventBus:            eventBus,
+		sessionTTL:          sessionTTL,
+		logger:              logger,
+		loginLimiter:        domain.NoopRateLimiter{},
+		loginAttemptsBudget: DefaultLoginAttemptsPerWindow,
+		loginRateWindow:     DefaultLoginRateWindow,
 	}
 	for _, opt := range opts {
 		if err := opt(svc); err != nil {
@@ -122,6 +141,10 @@ func (s *AuthnAppService) Login(ctx context.Context, cmd *command.Login) (*domai
 	strategy, ok := s.strategies[domain.CredentialType(cmd.Provider)]
 	if !ok {
 		return nil, domain.ErrUnsupportedProvider
+	}
+
+	if err := s.checkLoginRateLimit(ctx, cmd, strategy); err != nil {
+		return nil, err
 	}
 
 	result, err := strategy.Authenticate(ctx, &domain.AuthnRequest{
@@ -323,6 +346,62 @@ func (s *AuthnAppService) Register(ctx context.Context, cmd *command.Register) (
 		Provider: provider,
 		Params:   params,
 	})
+}
+
+// checkLoginRateLimit applies the per-IP and (when the strategy exposes
+// one) per-subject quota. Returns *domain.RateLimitedError when the
+// caller is over budget; transports translate that to their own status
+// (HTTP 429 + Retry-After, gRPC RESOURCE_EXHAUSTED, …).
+//
+// Failures from the limiter itself are intentionally non-fatal: a Redis
+// blip should never lock real users out. We log the failure and let the
+// request through.
+func (s *AuthnAppService) checkLoginRateLimit(
+	ctx context.Context,
+	cmd *command.Login,
+	strategy domain.AuthnStrategy,
+) error {
+	if s.loginLimiter == nil {
+		return nil
+	}
+
+	type bucket struct {
+		scope string
+		key   string
+	}
+	buckets := make([]bucket, 0, 2)
+
+	if cmd.IPAddress != "" {
+		buckets = append(buckets, bucket{scope: "ip", key: "login:ip:" + cmd.IPAddress})
+	}
+	if extractor, ok := strategy.(domain.SubjectExtractor); ok {
+		if subject := extractor.Subject(cmd.Params); subject != "" {
+			// Scope subject keys per app+provider so a user reusing the
+			// same email across apps doesn't blow each other's budget.
+			buckets = append(buckets, bucket{
+				scope: "subject",
+				key:   fmt.Sprintf("login:sub:%s:%s:%s", cmd.AppID, cmd.Provider, subject),
+			})
+		}
+	}
+
+	for _, b := range buckets {
+		allowed, retryAfter, err := s.loginLimiter.Allow(ctx, b.key, s.loginAttemptsBudget, s.loginRateWindow)
+		if err != nil {
+			s.logger.WarnContext(ctx, "login rate limiter unavailable; failing open",
+				"scope", b.scope,
+				"error", err,
+			)
+			continue
+		}
+		if !allowed {
+			if retryAfter <= 0 {
+				retryAfter = s.loginRateWindow
+			}
+			return &domain.RateLimitedError{Scope: b.scope, RetryAfter: retryAfter}
+		}
+	}
+	return nil
 }
 
 func toSessionDTO(s *domain.Session) *SessionDTO {

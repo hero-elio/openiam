@@ -2,6 +2,7 @@ package application
 
 import (
 	"fmt"
+	"time"
 
 	"openiam/internal/authn/adapter/outbound/strategy"
 	"openiam/internal/authn/domain"
@@ -53,6 +54,26 @@ func WithRegistrar(r domain.UserRegistrar) Option {
 func WithUserInfoProvider(p domain.UserInfoProvider) Option {
 	return func(svc *AuthnAppService) error {
 		svc.userInfo = p
+		return nil
+	}
+}
+
+// WithLoginRateLimit installs a rate limiter for AuthnAppService.Login.
+// limiter==nil disables throttling entirely; pass NoopRateLimiter
+// explicitly for the same effect with intent. attempts<=0 or window<=0
+// fall back to the package defaults.
+func WithLoginRateLimit(limiter domain.RateLimiter, attempts int, window time.Duration) Option {
+	return func(svc *AuthnAppService) error {
+		if limiter == nil {
+			limiter = domain.NoopRateLimiter{}
+		}
+		svc.loginLimiter = limiter
+		if attempts > 0 {
+			svc.loginAttemptsBudget = attempts
+		}
+		if window > 0 {
+			svc.loginRateWindow = window
+		}
 		return nil
 	}
 }

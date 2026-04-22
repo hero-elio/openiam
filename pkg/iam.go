@@ -15,6 +15,7 @@ import (
 
 	"openiam/internal/authn"
 	authnPersistence "openiam/internal/authn/adapter/outbound/persistence"
+	authnRateLimit "openiam/internal/authn/adapter/outbound/ratelimit"
 	authnToken "openiam/internal/authn/adapter/outbound/token"
 	"openiam/internal/authz"
 	"openiam/internal/identity"
@@ -148,6 +149,7 @@ func WithAuthn(cfg authn.Config) Option {
 			Identity:      authn.NewIdentityBridge(e.Identity.Service),
 			Apps:          e.scopeValidatorOrNil(),
 			TokenProvider: jwtProvider,
+			RateLimiter:   authnRateLimit.NewRedis(e.Deps.Redis),
 			Logger:        e.Deps.Logger,
 		})
 		if err != nil {

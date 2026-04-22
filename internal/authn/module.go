@@ -76,7 +76,10 @@ type AuthenticatorDeps struct {
 	Identity      IdentityIntegration
 	Apps          authnDomain.AppDirectory
 	TokenProvider authnDomain.TokenProvider
-	Logger        *slog.Logger
+	// RateLimiter throttles login traffic. Optional: when nil the
+	// service installs a NoopRateLimiter and never blocks.
+	RateLimiter authnDomain.RateLimiter
+	Logger      *slog.Logger
 }
 
 // NewIdentityBridge adapts identity application services to authn domain ports.
@@ -117,6 +120,14 @@ func NewAuthenticator(cfg Config, deps AuthenticatorDeps) (*Authenticator, error
 		authnApp.WithPasswordAuth(deps.Credentials, id),
 		authnApp.WithRegistrar(id),
 		authnApp.WithUserInfoProvider(id),
+	}
+
+	// Login throttling lives in the application layer so any transport
+	// (REST, gRPC, …) gets the same protection. nil keeps the package
+	// default (NoopRateLimiter); pass an explicit Noop to make the
+	// "intentionally disabled" case obvious in deployment configs.
+	if deps.RateLimiter != nil {
+		opts = append(opts, authnApp.WithLoginRateLimit(deps.RateLimiter, 0, 0))
 	}
 
 	if cfg.SIWEDomain != "" {

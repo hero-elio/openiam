@@ -40,6 +40,18 @@ type ChallengeableStrategy interface {
 	Challenge(ctx context.Context, req *ChallengeRequest) (*ChallengeResponse, error)
 }
 
+// SubjectExtractor lets a strategy expose the natural "subject" of a
+// login attempt (e.g. email for password, phone for SMS). The application
+// layer uses it to throttle per-account brute-force attempts independent
+// of the wire protocol that delivered the request.
+//
+// Strategies that have no meaningful subject (opaque cryptographic
+// payloads such as SIWE / WebAuthn) should not implement this interface;
+// callers fall back to per-IP throttling only.
+type SubjectExtractor interface {
+	Subject(params json.RawMessage) string
+}
+
 type AuthnResult struct {
 	UserID   shared.UserID
 	TenantID shared.TenantID
