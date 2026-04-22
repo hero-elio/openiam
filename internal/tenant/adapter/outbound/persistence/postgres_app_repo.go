@@ -10,11 +10,17 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/lib/pq"
 
 	shared "openiam/internal/shared/domain"
 	sharedPersistence "openiam/internal/shared/infra/persistence"
 	"openiam/internal/tenant/domain"
 )
+
+// pgUniqueViolation is the SQLSTATE code for a UNIQUE constraint
+// breach. We translate it into business-meaningful errors instead of
+// leaking driver-level strings to callers.
+const pgUniqueViolation = "23505"
 
 type stringSlice []string
 
@@ -54,10 +60,11 @@ type applicationRow struct {
 	RedirectURIs     stringSlice `db:"redirect_uris"`
 	Scopes           stringSlice `db:"scopes"`
 	Status           string      `db:"status"`
+	Version          int         `db:"version"`
 	CreatedAt        time.Time   `db:"created_at"`
 }
 
-const appColumns = `id, tenant_id, name, client_id, client_secret_hash, redirect_uris, scopes, status, created_at`
+const appColumns = `id, tenant_id, name, client_id, client_secret_hash, redirect_uris, scopes, status, version, created_at`
 
 type PostgresApplicationRepository struct {
 	db *sqlx.DB
@@ -70,16 +77,22 @@ func NewPostgresApplicationRepository(db *sqlx.DB) *PostgresApplicationRepositor
 func (r *PostgresApplicationRepository) Save(ctx context.Context, app *domain.Application) error {
 	conn := sharedPersistence.Conn(ctx, r.db)
 
+	// Optimistic lock: the UPDATE branch only fires when the persisted
+	// version still matches the loaded snapshot ($10). A stale writer
+	// gets RowsAffected==0 and we surface ErrConcurrentUpdate so the
+	// caller can retry instead of silently overwriting a sibling edit.
 	const q = `
-		INSERT INTO applications (id, tenant_id, name, client_id, client_secret_hash, redirect_uris, scopes, status, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		INSERT INTO applications (id, tenant_id, name, client_id, client_secret_hash, redirect_uris, scopes, status, version, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $11, $9)
 		ON CONFLICT (id) DO UPDATE SET
 			name = EXCLUDED.name,
 			redirect_uris = EXCLUDED.redirect_uris,
 			scopes = EXCLUDED.scopes,
-			status = EXCLUDED.status`
+			status = EXCLUDED.status,
+			version = applications.version + 1
+		WHERE applications.version = $10`
 
-	_, err := conn.ExecContext(ctx, q,
+	res, err := conn.ExecContext(ctx, q,
 		app.ID.String(),
 		app.TenantID.String(),
 		app.Name,
@@ -89,8 +102,30 @@ func (r *PostgresApplicationRepository) Save(ctx context.Context, app *domain.Ap
 		stringSlice(app.Scopes),
 		app.Status,
 		app.CreatedAt,
+		app.Version,
+		app.Version+1,
 	)
-	return err
+	if err != nil {
+		// UNIQUE(client_id) is the only non-PK uniqueness on this
+		// table, so any 23505 here means the caller picked a
+		// client_id that already exists — surface that as a domain
+		// error instead of leaking the raw pq.Error.
+		var pgErr *pq.Error
+		if errors.As(err, &pgErr) && string(pgErr.Code) == pgUniqueViolation {
+			return domain.ErrClientIDTaken
+		}
+		return err
+	}
+
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return shared.ErrConcurrentUpdate
+	}
+	app.Version++
+	return nil
 }
 
 func (r *PostgresApplicationRepository) FindByID(ctx context.Context, id shared.AppID) (*domain.Application, error) {
@@ -143,7 +178,7 @@ func (r *PostgresApplicationRepository) ListByTenant(ctx context.Context, tenant
 }
 
 func rowToApplication(row applicationRow) *domain.Application {
-	return &domain.Application{
+	app := &domain.Application{
 		ID:               shared.AppID(row.ID),
 		TenantID:         shared.TenantID(row.TenantID),
 		Name:             row.Name,
@@ -154,4 +189,6 @@ func rowToApplication(row applicationRow) *domain.Application {
 		Status:           row.Status,
 		CreatedAt:        row.CreatedAt,
 	}
+	app.Version = row.Version
+	return app
 }
