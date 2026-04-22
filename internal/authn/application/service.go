@@ -184,13 +184,22 @@ func (s *AuthnAppService) Login(ctx context.Context, cmd *command.Login) (*domai
 		return nil, err
 	}
 
-	_ = s.eventBus.Publish(ctx, domain.UserLoggedInEvent{
+	if err := s.eventBus.Publish(ctx, domain.UserLoggedInEvent{
 		UserID:    result.UserID,
 		AppID:     appID,
 		Provider:  cmd.Provider,
 		SessionID: sessionID,
 		Timestamp: time.Now(),
-	})
+	}); err != nil {
+		// Login already succeeded — don't fail the user request, but
+		// don't lose the signal either: subscribers (audit, anomaly
+		// detection) may have just been skipped.
+		s.logger.WarnContext(ctx, "publish UserLoggedInEvent failed",
+			"err", err,
+			"user_id", result.UserID,
+			"session_id", sessionID,
+		)
+	}
 
 	s.logger.InfoContext(ctx, "user logged in",
 		"user_id", result.UserID,
@@ -227,11 +236,17 @@ func (s *AuthnAppService) Logout(ctx context.Context, cmd *command.Logout) error
 		return err
 	}
 
-	_ = s.eventBus.Publish(ctx, domain.UserLoggedOutEvent{
+	if err := s.eventBus.Publish(ctx, domain.UserLoggedOutEvent{
 		UserID:    userID,
 		SessionID: sessionID,
 		Timestamp: time.Now(),
-	})
+	}); err != nil {
+		s.logger.WarnContext(ctx, "publish UserLoggedOutEvent failed",
+			"err", err,
+			"user_id", userID,
+			"session_id", sessionID,
+		)
+	}
 
 	s.logger.InfoContext(ctx, "user logged out",
 		"user_id", userID,
@@ -269,11 +284,17 @@ func (s *AuthnAppService) RefreshToken(ctx context.Context, cmd *command.Refresh
 		return nil, err
 	}
 
-	_ = s.eventBus.Publish(ctx, domain.TokenRefreshedEvent{
+	if err := s.eventBus.Publish(ctx, domain.TokenRefreshedEvent{
 		UserID:    session.UserID,
 		SessionID: session.ID,
 		Timestamp: time.Now(),
-	})
+	}); err != nil {
+		s.logger.WarnContext(ctx, "publish TokenRefreshedEvent failed",
+			"err", err,
+			"user_id", session.UserID,
+			"session_id", session.ID,
+		)
+	}
 
 	return tokenPair, nil
 }
