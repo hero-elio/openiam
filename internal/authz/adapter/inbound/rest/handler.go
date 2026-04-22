@@ -196,6 +196,14 @@ func (h *Handler) handleAssignRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The Checker only verified `roles:assign` against the caller's own
+	// claims.AppID. A privileged user in app A must not be able to mutate
+	// assignments inside app B by pointing the request at a different app.
+	if claims, ok := sharedAuth.ClaimsFromContext(r.Context()); !ok || claims.AppID != req.AppID {
+		writeError(w, http.StatusForbidden, "forbidden", "cannot assign roles outside the caller's app context")
+		return
+	}
+
 	err := h.svc.AssignRole(r.Context(), &command.AssignRole{
 		UserID:   userID,
 		AppID:    req.AppID,
@@ -217,6 +225,11 @@ func (h *Handler) handleUnassignRole(w http.ResponseWriter, r *http.Request) {
 
 	if appID == "" {
 		writeError(w, http.StatusBadRequest, "invalid_argument", "app_id query parameter is required")
+		return
+	}
+
+	if claims, ok := sharedAuth.ClaimsFromContext(r.Context()); !ok || claims.AppID != appID {
+		writeError(w, http.StatusForbidden, "forbidden", "cannot unassign roles outside the caller's app context")
 		return
 	}
 

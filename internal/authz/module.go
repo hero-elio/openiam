@@ -35,13 +35,17 @@ func NewAuthorizer(db *sqlx.DB, bus shared.EventBus, txMgr shared.TxManager) (*A
 		if !ok {
 			return shared.ErrUnauthorized
 		}
-		appID := claims.AppID
-		if appID == "" {
-			appID = "default"
+		// An empty AppID used to silently fall back to a synthetic "default"
+		// app, so any role granted under that name (notably super_admin)
+		// could be exercised by tokens that never selected an application.
+		// Refuse the request instead — every protected route must run inside
+		// an explicit application context.
+		if claims.AppID == "" {
+			return shared.ErrForbidden
 		}
 		result, err := svc.CheckPermission(ctx, &authzQuery.CheckPermission{
 			UserID:   claims.UserID,
-			AppID:    appID,
+			AppID:    claims.AppID,
 			Resource: resource,
 			Action:   action,
 		})
