@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"time"
 
 	shared "openiam/internal/shared/domain"
 
@@ -14,6 +15,7 @@ type UserDTO struct {
 	ID          string
 	Email       string
 	DisplayName string
+	AvatarURL   string
 	Status      string
 	TenantID    string
 	CreatedAt   string
@@ -134,7 +136,12 @@ func (s *IdentityService) UpdateProfile(ctx context.Context, cmd *command.Update
 		AvatarURL:   cmd.AvatarURL,
 	})
 
-	return s.userRepo.Save(ctx, user)
+	return s.txManager.Execute(ctx, func(txCtx context.Context) error {
+		if err := s.userRepo.Save(txCtx, user); err != nil {
+			return err
+		}
+		return s.eventBus.Publish(txCtx, user.PullEvents()...)
+	})
 }
 
 func (s *IdentityService) FindByEmail(ctx context.Context, tenantID shared.TenantID, emailStr string) (*UserDTO, error) {
@@ -154,8 +161,9 @@ func toUserDTO(u *domain.User) *UserDTO {
 		ID:          u.ID.String(),
 		Email:       u.Email.String(),
 		DisplayName: u.Profile.DisplayName,
+		AvatarURL:   u.Profile.AvatarURL,
 		Status:      string(u.Status),
 		TenantID:    u.TenantID.String(),
-		CreatedAt:   u.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		CreatedAt:   u.CreatedAt.Format(time.RFC3339),
 	}
 }

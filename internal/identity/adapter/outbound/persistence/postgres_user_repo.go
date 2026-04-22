@@ -19,6 +19,7 @@ type userRow struct {
 	Email        string    `db:"email"`
 	PasswordHash string    `db:"password_hash"`
 	DisplayName  string    `db:"display_name"`
+	AvatarURL    string    `db:"avatar_url"`
 	Status       string    `db:"status"`
 	Version      int       `db:"version"`
 	CreatedAt    time.Time `db:"created_at"`
@@ -42,16 +43,17 @@ func (r *PostgresUserRepository) Save(ctx context.Context, user *domain.User) er
 	// so the caller can retry against the latest snapshot instead of
 	// silently overwriting somebody else's update.
 	const upsert = `
-		INSERT INTO users (id, tenant_id, email, password_hash, display_name, status, version, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $8, $9, $10)
+		INSERT INTO users (id, tenant_id, email, password_hash, display_name, avatar_url, status, version, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $9, $10, $11)
 		ON CONFLICT (id) DO UPDATE SET
 			email = EXCLUDED.email,
 			password_hash = EXCLUDED.password_hash,
 			display_name = EXCLUDED.display_name,
+			avatar_url = EXCLUDED.avatar_url,
 			status = EXCLUDED.status,
 			version = users.version + 1,
 			updated_at = EXCLUDED.updated_at
-		WHERE users.version = $7`
+		WHERE users.version = $8`
 
 	res, err := conn.ExecContext(ctx, upsert,
 		user.ID.String(),
@@ -59,6 +61,7 @@ func (r *PostgresUserRepository) Save(ctx context.Context, user *domain.User) er
 		user.Email.String(),
 		user.Password.Hash(),
 		user.Profile.DisplayName,
+		user.Profile.AvatarURL,
 		string(user.Status),
 		user.Version,
 		user.Version+1,
@@ -121,10 +124,13 @@ func (r *PostgresUserRepository) ExistsByEmail(ctx context.Context, tenantID sha
 
 func rowToUser(row userRow) *domain.User {
 	u := &domain.User{
-		ID:        shared.UserID(row.ID),
-		Email:     domain.NewEmailFromTrusted(row.Email),
-		Password:  domain.NewPasswordFromHash(row.PasswordHash),
-		Profile:   domain.Profile{DisplayName: row.DisplayName},
+		ID:       shared.UserID(row.ID),
+		Email:    domain.NewEmailFromTrusted(row.Email),
+		Password: domain.NewPasswordFromHash(row.PasswordHash),
+		Profile: domain.Profile{
+			DisplayName: row.DisplayName,
+			AvatarURL:   row.AvatarURL,
+		},
 		Status:    domain.UserStatus(row.Status),
 		TenantID:  shared.TenantID(row.TenantID),
 		CreatedAt: row.CreatedAt,

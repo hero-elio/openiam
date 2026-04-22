@@ -116,6 +116,7 @@ func (h *Handler) handleGetUser(w http.ResponseWriter, r *http.Request) {
 		ID:          dto.ID,
 		Email:       dto.Email,
 		DisplayName: dto.DisplayName,
+		AvatarURL:   dto.AvatarURL,
 		Status:      dto.Status,
 		TenantID:    dto.TenantID,
 		CreatedAt:   dto.CreatedAt,

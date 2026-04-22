@@ -110,6 +110,13 @@ func (u *User) ChangePassword(oldRaw, newRaw string) error {
 func (u *User) UpdateProfile(profile Profile) {
 	u.Profile = profile
 	u.UpdatedAt = time.Now()
+	u.RecordEvent(ProfileUpdatedEvent{
+		UserID:      u.ID,
+		TenantID:    u.TenantID,
+		DisplayName: profile.DisplayName,
+		AvatarURL:   profile.AvatarURL,
+		Timestamp:   u.UpdatedAt,
+	})
 }
 
 func (u *User) IsActive() bool {

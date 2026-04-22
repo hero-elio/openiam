@@ -12,6 +12,7 @@ type UserResponse struct {
 	ID          string `json:"id"`
 	Email       string `json:"email"`
 	DisplayName string `json:"display_name"`
+	AvatarURL   string `json:"avatar_url"`
 	Status      string `json:"status"`
 	TenantID    string `json:"tenant_id"`
 	CreatedAt   string `json:"created_at"`

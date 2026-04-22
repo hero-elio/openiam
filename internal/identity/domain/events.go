@@ -10,6 +10,7 @@ const (
 	EventUserRegistered  = "user.registered"
 	EventUserActivated   = "user.activated"
 	EventPasswordChanged = "user.password_changed"
+	EventProfileUpdated  = "user.profile_updated"
 )
 
 type UserRegisteredEvent struct {
@@ -51,3 +52,15 @@ type PasswordChangedEvent struct {
 func (e PasswordChangedEvent) EventName() string     { return EventPasswordChanged }
 func (e PasswordChangedEvent) OccurredAt() time.Time { return e.Timestamp }
 func (e PasswordChangedEvent) AggregateID() string   { return e.UserID.String() }
+
+type ProfileUpdatedEvent struct {
+	UserID      shared.UserID
+	TenantID    shared.TenantID
+	DisplayName string
+	AvatarURL   string
+	Timestamp   time.Time
+}
+
+func (e ProfileUpdatedEvent) EventName() string     { return EventProfileUpdated }
+func (e ProfileUpdatedEvent) OccurredAt() time.Time { return e.Timestamp }
+func (e ProfileUpdatedEvent) AggregateID() string   { return e.UserID.String() }
