@@ -123,6 +123,7 @@ func WithIdentity() Option {
 			e.checkerOrNil(),
 			e.scopeValidatorOrNil(),
 		)
+		e.lateBindAuthzExistence()
 		return nil
 	}
 }
@@ -169,6 +170,7 @@ func WithAuthz() Option {
 		}
 		e.Authz = mod
 		e.lateBindChecker()
+		e.lateBindAuthzExistence()
 		return nil
 	}
 }
@@ -178,6 +180,7 @@ func WithTenant() Option {
 		e.ensureDefaults()
 		e.Tenant = tenant.NewManager(e.Deps.DB, e.Deps.EventBus, e.Deps.TxManager, e.checkerOrNil())
 		e.lateBindScopeValidator()
+		e.lateBindAuthzExistence()
 		return nil
 	}
 }
@@ -336,6 +339,36 @@ func (e *Engine) lateBindChecker() {
 	if e.Tenant != nil && e.Tenant.Handler == nil {
 		e.Tenant = tenant.NewManager(e.Deps.DB, e.Deps.EventBus, e.Deps.TxManager, check)
 	}
+}
+
+// lateBindAuthzExistence wires the subject-existence port into the
+// authz service once both identity and tenant modules are available.
+// Called from WithIdentity, WithTenant, and WithAuthz so the order of
+// option application doesn't matter.
+func (e *Engine) lateBindAuthzExistence() {
+	if e.Authz == nil || e.Identity == nil || e.Tenant == nil {
+		return
+	}
+	e.Authz.Service.SetSubjectExistence(subjectExistenceAdapter{
+		identity: e.Identity,
+		tenant:   e.Tenant,
+	})
+}
+
+// subjectExistenceAdapter composes Identity and Tenant into the single
+// authz domain port. Lives here (in the wiring layer) so neither
+// upstream module needs to know about the authz interface.
+type subjectExistenceAdapter struct {
+	identity *identity.Registry
+	tenant   *tenant.Manager
+}
+
+func (a subjectExistenceAdapter) UserExists(ctx context.Context, id shared.UserID) (bool, error) {
+	return a.identity.Service.UserExists(ctx, id)
+}
+
+func (a subjectExistenceAdapter) AppExists(ctx context.Context, id shared.AppID) (bool, error) {
+	return a.tenant.Service.AppExists(ctx, id)
 }
 
 // lateBindScopeValidator rewires Identity to pick up the tenant scope

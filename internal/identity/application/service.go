@@ -162,6 +162,24 @@ func (s *IdentityService) GetUser(ctx context.Context, q *query.GetUser) (*UserD
 	return toUserDTO(user), nil
 }
 
+// UserExists is a thin wrapper around the user repository for other
+// contexts (e.g. authz) that need a "is this a real user?" pre-check
+// without growing a transitive dependency on the identity domain.
+// Returns (false, nil) for a clean miss; only surfaces other errors.
+func (s *IdentityService) UserExists(ctx context.Context, id shared.UserID) (bool, error) {
+	if id == "" {
+		return false, nil
+	}
+	_, err := s.userRepo.FindByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, domain.ErrUserNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
 func (s *IdentityService) ChangePassword(ctx context.Context, cmd *command.ChangePassword) error {
 	user, err := s.userRepo.FindByID(ctx, shared.UserID(cmd.UserID))
 	if err != nil {

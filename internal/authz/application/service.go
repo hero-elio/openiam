@@ -64,6 +64,13 @@ type AuthzAppService struct {
 	enforcer    *domain.Enforcer
 	eventBus    shared.EventBus
 	txManager   shared.TxManager
+
+	// subjectExistence is an optional port the engine wires in once
+	// the identity and tenant modules are both constructed. When nil
+	// we skip the pre-check and rely on the caller — keeps unit tests
+	// and stand-alone authz usage compiling without the other
+	// contexts.
+	subjectExistence domain.SubjectExistence
 }
 
 func NewAuthzAppService(
@@ -82,6 +89,12 @@ func NewAuthzAppService(
 		eventBus:    eventBus,
 		txManager:   txManager,
 	}
+}
+
+// SetSubjectExistence installs the subject-existence port. Safe to
+// call multiple times — the last setter wins.
+func (s *AuthzAppService) SetSubjectExistence(se domain.SubjectExistence) {
+	s.subjectExistence = se
 }
 
 func (s *AuthzAppService) CreateRole(ctx context.Context, cmd *command.CreateRole) (shared.RoleID, error) {
@@ -134,6 +147,19 @@ func (s *AuthzAppService) AssignRole(ctx context.Context, cmd *command.AssignRol
 	tenantID := shared.TenantID(cmd.TenantID)
 	if userID == "" || appID == "" || roleID == "" {
 		return shared.ErrInvalidInput
+	}
+
+	// Refuse to attach a role to a non-existent user — without this
+	// the row goes in fine and only surfaces as a confusing "user has
+	// no roles" later. Skip when the port isn't wired (tests).
+	if s.subjectExistence != nil {
+		exists, err := s.subjectExistence.UserExists(ctx, userID)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			return domain.ErrUnknownSubject
+		}
 	}
 
 	role, err := s.roleRepo.FindByID(ctx, roleID)
@@ -292,10 +318,32 @@ func (s *AuthzAppService) ListUserRoles(ctx context.Context, q *query.ListUserRo
 // --- Resource Permission (ACL) methods ---
 
 func (s *AuthzAppService) GrantResourcePermission(ctx context.Context, cmd *command.GrantResourcePermission) error {
+	userID := shared.UserID(cmd.UserID)
+	appID := shared.AppID(cmd.AppID)
+
+	// Refuse grants targeting unknown user or app — same reasoning as
+	// AssignRole: silent ghost grants are worse than a 4xx.
+	if s.subjectExistence != nil {
+		userExists, err := s.subjectExistence.UserExists(ctx, userID)
+		if err != nil {
+			return err
+		}
+		if !userExists {
+			return domain.ErrUnknownSubject
+		}
+		appExists, err := s.subjectExistence.AppExists(ctx, appID)
+		if err != nil {
+			return err
+		}
+		if !appExists {
+			return domain.ErrUnknownSubject
+		}
+	}
+
 	now := time.Now()
 	rp := &domain.ResourcePermission{
-		UserID:       shared.UserID(cmd.UserID),
-		AppID:        shared.AppID(cmd.AppID),
+		UserID:       userID,
+		AppID:        appID,
 		TenantID:     shared.TenantID(cmd.TenantID),
 		ResourceType: cmd.ResourceType,
 		ResourceID:   cmd.ResourceID,

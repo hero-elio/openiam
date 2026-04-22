@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
@@ -116,6 +117,24 @@ func (s *TenantAppService) GetApplication(ctx context.Context, q *query.GetAppli
 		return nil, err
 	}
 	return toAppDTO(app), nil
+}
+
+// AppExists is a thin wrapper around the application repository for
+// other contexts (e.g. authz) that need a "does this app exist?"
+// pre-check without depending on the tenant domain. Returns
+// (false, nil) for a clean miss; only surfaces other errors.
+func (s *TenantAppService) AppExists(ctx context.Context, id shared.AppID) (bool, error) {
+	if id == "" {
+		return false, nil
+	}
+	_, err := s.appRepo.FindByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, domain.ErrAppNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }
 
 func (s *TenantAppService) ListApplications(ctx context.Context, q *query.ListApplications) ([]*ApplicationDTO, error) {
