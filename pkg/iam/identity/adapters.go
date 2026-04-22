@@ -22,20 +22,21 @@ func IntegrationFor(svc Service) authn.IdentityIntegration {
 	return identityAuthnBridge{svc: svc}
 }
 
-// SubjectExistencePartial is the slice of authz.SubjectExistence that
-// the identity module owns: "is this user id a real user?". The
-// authz module composes one SubjectExistence from however many
-// partials the host wires (typically identity + tenant).
+// UserExistence is the user-side slice of authz.SubjectExistence the
+// identity module owns: "is this user id a real user?". The authz
+// module composes one SubjectExistence from a UserExistence and an
+// AppExistence; identity supplies the former, tenant the latter.
 //
-// The full type is declared in pkg/iam/authz to avoid an authz import
-// cycle here.
-type SubjectExistencePartial interface {
+// The full SubjectExistence type lives in pkg/iam/authz; this
+// interface stays here so SDK consumers can wire identity into authz
+// without an authz import.
+type UserExistence interface {
 	UserExists(ctx context.Context, id UserID) (bool, error)
 }
 
 // SubjectExistenceFor exposes the identity module as the user-side
 // half of authz.SubjectExistence.
-func SubjectExistenceFor(svc Service) SubjectExistencePartial {
+func SubjectExistenceFor(svc Service) UserExistence {
 	return identityAuthzBridge{svc: svc}
 }
 

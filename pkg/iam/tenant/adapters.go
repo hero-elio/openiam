@@ -25,18 +25,21 @@ func ScopeValidatorFor(svc Service) identity.ScopeValidator {
 	return tenantIdentityBridge{svc: svc}
 }
 
-// SubjectExistenceFor exposes the tenant module as the app-side half
-// of authz.SubjectExistence. Compose with identity.SubjectExistenceFor
-// via authz.ComposeSubjectExistence to get the full port.
+// AppExistence is the app-side slice of authz.SubjectExistence the
+// tenant module owns: "is this app id a real app?". Compose with
+// identity.UserExistence via authz.ComposeSubjectExistence to get the
+// full port.
 //
-// The returned interface intentionally only declares the AppExists
-// method — the user side belongs to identity. The authz composer
-// merges however many partials the host wires.
-type SubjectExistencePartial interface {
+// The full SubjectExistence type lives in pkg/iam/authz; this
+// interface stays here so SDK consumers can wire tenant into authz
+// without an authz import.
+type AppExistence interface {
 	AppExists(ctx context.Context, id AppID) (bool, error)
 }
 
-func SubjectExistenceFor(svc Service) SubjectExistencePartial {
+// SubjectExistenceFor exposes the tenant module as the app-side half
+// of authz.SubjectExistence.
+func SubjectExistenceFor(svc Service) AppExistence {
 	return tenantAuthzBridge{svc: svc}
 }
 

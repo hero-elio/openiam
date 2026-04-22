@@ -13,9 +13,8 @@ import (
 
 	"github.com/spf13/viper"
 
-	iam "openiam/pkg"
-
-	"openiam/internal/authn"
+	"openiam/pkg/iam"
+	"openiam/pkg/iam/authn"
 )
 
 func main() {
@@ -69,25 +68,33 @@ func main() {
 		os.Exit(1)
 	}
 
-	engine, err := iam.New(
-		iam.WithLogger(logger),
-		iam.WithPostgres(v.GetString("database.dsn")),
-		iam.WithRedis(v.GetString("redis.addr"), v.GetString("redis.password"), v.GetInt("redis.db")),
-		iam.WithIdentity(),
-		iam.WithAuthn(authn.Config{
-			JWTSecret:              v.GetString("jwt.secret"),
-			JWTIssuer:              v.GetString("jwt.issuer"),
-			AccessTokenTTL:         accessTTL,
-			SessionTTL:             sessionTTL,
-			AllowInsecureJWTSecret: v.GetBool("jwt.allow_insecure"),
-			SIWEDomain:             v.GetString("siwe.domain"),
-			WebAuthnRPID:           v.GetString("webauthn.rp_id"),
-			WebAuthnRPName:         v.GetString("webauthn.rp_name"),
-			WebAuthnRPOrigins:      splitAndTrim(v.GetString("webauthn.rp_origins")),
-		}),
-		iam.WithAuthz(),
-		iam.WithTenant(),
-	)
+	engine, err := iam.New(iam.Config{
+		Logger: logger,
+		Postgres: &iam.PostgresConfig{
+			DSN: v.GetString("database.dsn"),
+		},
+		Redis: &iam.RedisConfig{
+			Addr:     v.GetString("redis.addr"),
+			Password: v.GetString("redis.password"),
+			DB:       v.GetInt("redis.db"),
+		},
+		Tenant:   &iam.TenantConfig{},
+		Identity: &iam.IdentityConfig{},
+		Authz:    &iam.AuthzConfig{},
+		Authn: &iam.AuthnConfig{
+			Config: authn.Config{
+				JWTSecret:              v.GetString("jwt.secret"),
+				JWTIssuer:              v.GetString("jwt.issuer"),
+				AccessTokenTTL:         accessTTL,
+				SessionTTL:             sessionTTL,
+				AllowInsecureJWTSecret: v.GetBool("jwt.allow_insecure"),
+				SIWEDomain:             v.GetString("siwe.domain"),
+				WebAuthnRPID:           v.GetString("webauthn.rp_id"),
+				WebAuthnRPName:         v.GetString("webauthn.rp_name"),
+				WebAuthnRPOrigins:      splitAndTrim(v.GetString("webauthn.rp_origins")),
+			},
+		},
+	})
 	if err != nil {
 		logger.Error("failed to initialize engine", "error", err)
 		os.Exit(1)

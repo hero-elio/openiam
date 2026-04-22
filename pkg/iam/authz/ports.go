@@ -1,8 +1,6 @@
 package authz
 
 import (
-	"context"
-
 	"openiam/internal/authz/domain"
 )
 
@@ -22,15 +20,3 @@ type (
 // ComposeSubjectExistence; standalone deployments can inject
 // NoOpSubjectExistence to acknowledge they're skipping the check.
 type SubjectExistence = domain.SubjectExistence
-
-// SubjectExistencePartial is one half of SubjectExistence. The
-// identity module supplies the user side; the tenant module supplies
-// the app side. ComposeSubjectExistence merges them.
-//
-// The interface is defined here (rather than as a single anonymous
-// closure) so future modules can advertise additional partials and
-// the host can compose them without touching this file.
-type SubjectExistencePartial interface {
-	UserExists(ctx context.Context, id UserID) (bool, error)
-	AppExists(ctx context.Context, id AppID) (bool, error)
-}

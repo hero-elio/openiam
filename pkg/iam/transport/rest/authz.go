@@ -16,22 +16,22 @@ import (
 
 // Endpoint names accepted by SkipEndpoints for MountAuthz.
 const (
-	AuthzEndpointCreateRole          = "role.create"
-	AuthzEndpointListRoles           = "role.list"
-	AuthzEndpointDeleteRole          = "role.delete"
-	AuthzEndpointGrantPermission     = "role.permission.grant"
-	AuthzEndpointRevokePermission    = "role.permission.revoke"
-	AuthzEndpointAssignRole          = "user.role.assign"
-	AuthzEndpointUnassignRole        = "user.role.unassign"
-	AuthzEndpointListUserRoles       = "user.role.list"
-	AuthzEndpointCheckPermission     = "permission.check"
-	AuthzEndpointGrantResource       = "resource.permission.grant"
-	AuthzEndpointRevokeResource      = "resource.permission.revoke"
-	AuthzEndpointCheckResource       = "resource.permission.check"
-	AuthzEndpointListResource        = "resource.permission.list"
-	AuthzEndpointRegisterPermission  = "permission.definition.create"
-	AuthzEndpointListPermissionDefs  = "permission.definition.list"
-	AuthzEndpointDeletePermission    = "permission.definition.delete"
+	AuthzEndpointCreateRole         = "role.create"
+	AuthzEndpointListRoles          = "role.list"
+	AuthzEndpointDeleteRole         = "role.delete"
+	AuthzEndpointGrantPermission    = "role.permission.grant"
+	AuthzEndpointRevokePermission   = "role.permission.revoke"
+	AuthzEndpointAssignRole         = "user.role.assign"
+	AuthzEndpointUnassignRole       = "user.role.unassign"
+	AuthzEndpointListUserRoles      = "user.role.list"
+	AuthzEndpointCheckPermission    = "permission.check"
+	AuthzEndpointGrantResource      = "resource.permission.grant"
+	AuthzEndpointRevokeResource     = "resource.permission.revoke"
+	AuthzEndpointCheckResource      = "resource.permission.check"
+	AuthzEndpointListResource       = "resource.permission.list"
+	AuthzEndpointRegisterPermission = "permission.definition.create"
+	AuthzEndpointListPermissionDefs = "permission.definition.list"
+	AuthzEndpointDeletePermission   = "permission.definition.delete"
 )
 
 // MountAuthz registers the authorization routes onto r against svc.

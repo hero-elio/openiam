@@ -4,48 +4,51 @@ import (
 	"context"
 )
 
-// ComposeSubjectExistence merges N partials into a single
-// SubjectExistence implementation. UserExists / AppExists short-circuit
-// on the first partial that returns either an affirmative answer or a
-// real error; "not found" answers from earlier partials fall through
-// to the next.
+// UserExistence is the user-side half of SubjectExistence — the slice
+// the identity module owns. The bridge returned by
+// pkg/iam/identity.SubjectExistenceFor satisfies it directly.
+type UserExistence interface {
+	UserExists(ctx context.Context, id UserID) (bool, error)
+}
+
+// AppExistence is the app-side half of SubjectExistence — the slice
+// the tenant module owns. The bridge returned by
+// pkg/iam/tenant.SubjectExistenceFor satisfies it directly.
+type AppExistence interface {
+	AppExists(ctx context.Context, id AppID) (bool, error)
+}
+
+// ComposeSubjectExistence merges a UserExistence and an AppExistence
+// into the combined port the authz service consumes. Either argument
+// may be nil; missing halves report "not found" so a misconfiguration
+// fails closed (the authz service refuses the grant) rather than
+// silently allowing it.
 //
-// The typical wiring is two partials — identity provides UserExists,
-// tenant provides AppExists — but the contract works for any N so
-// future modules (e.g. service-account directory) can join the chain
-// without touching this file.
-func ComposeSubjectExistence(parts ...SubjectExistencePartial) SubjectExistence {
-	return composedExistence{parts: parts}
+// The typical wiring is identity.SubjectExistenceFor for the user side
+// and tenant.SubjectExistenceFor for the app side. Standalone
+// deployments can skip composition entirely by passing
+// NoOpSubjectExistence to Deps.SubjectExistence.
+func ComposeSubjectExistence(users UserExistence, apps AppExistence) SubjectExistence {
+	return composedExistence{users: users, apps: apps}
 }
 
 type composedExistence struct {
-	parts []SubjectExistencePartial
+	users UserExistence
+	apps  AppExistence
 }
 
 func (c composedExistence) UserExists(ctx context.Context, id UserID) (bool, error) {
-	for _, p := range c.parts {
-		ok, err := p.UserExists(ctx, id)
-		if err != nil {
-			return false, err
-		}
-		if ok {
-			return true, nil
-		}
+	if c.users == nil {
+		return false, nil
 	}
-	return false, nil
+	return c.users.UserExists(ctx, id)
 }
 
 func (c composedExistence) AppExists(ctx context.Context, id AppID) (bool, error) {
-	for _, p := range c.parts {
-		ok, err := p.AppExists(ctx, id)
-		if err != nil {
-			return false, err
-		}
-		if ok {
-			return true, nil
-		}
+	if c.apps == nil {
+		return false, nil
 	}
-	return false, nil
+	return c.apps.AppExists(ctx, id)
 }
 
 // NoOpSubjectExistence is the explicit "skip the pre-check" stand-in

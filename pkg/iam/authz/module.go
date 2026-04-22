@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	authzEvent "openiam/internal/authz/adapter/inbound/event"
 	authzApp "openiam/internal/authz/application"
 	"openiam/internal/authz/domain"
 	sharedAuth "openiam/internal/shared/auth"
@@ -74,6 +75,22 @@ func New(_ Config, deps Deps) (*Module, error) {
 	)
 	if deps.SubjectExistence != nil {
 		svc.SetSubjectExistence(deps.SubjectExistence)
+	}
+
+	// Wire the cross-context subscribers that auto-assign default
+	// roles when a user registers and seed app roles + builtin
+	// permissions when a new application is created. Both are
+	// no-ops if the publishing modules (identity, tenant) are not
+	// installed; the authz module wires them unconditionally so an
+	// SDK consumer that adds identity/tenant later automatically
+	// picks up the behaviour.
+	roleTemplateProvider, ok := deps.Roles.(domain.RoleTemplateProvider)
+	if !ok {
+		return nil, fmt.Errorf("authz: Deps.Roles must implement domain.RoleTemplateProvider")
+	}
+	sub := authzEvent.NewSubscriber(deps.Roles, roleTemplateProvider, deps.PermissionDefinitions, deps.EventBus, deps.TxManager)
+	if err := sub.Register(); err != nil {
+		return nil, fmt.Errorf("authz: register event subscriber: %w", err)
 	}
 
 	return &Module{

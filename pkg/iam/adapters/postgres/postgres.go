@@ -31,10 +31,12 @@ import (
 	authnPersistence "openiam/internal/authn/adapter/outbound/persistence"
 	authzPersistence "openiam/internal/authz/adapter/outbound/persistence"
 	identityPersistence "openiam/internal/identity/adapter/outbound/persistence"
+	sharedPersistence "openiam/internal/shared/infra/persistence"
 	tenantPersistence "openiam/internal/tenant/adapter/outbound/persistence"
 
 	"openiam/pkg/iam/authn"
 	"openiam/pkg/iam/authz"
+	"openiam/pkg/iam/eventbus"
 	"openiam/pkg/iam/identity"
 	"openiam/pkg/iam/tenant"
 )
@@ -76,4 +78,12 @@ func Adapters(db *sqlx.DB) AdapterSet {
 		Tenants:      tenantPersistence.NewPostgresTenantRepository(db),
 		Applications: tenantPersistence.NewPostgresApplicationRepository(db),
 	}
+}
+
+// TxManager returns a TxManager backed by db. Use it when wiring
+// modules manually (Style 2 in the SDK README) so identity / authz can
+// run their cross-aggregate writes inside a single Postgres
+// transaction.
+func TxManager(db *sqlx.DB) eventbus.TxManager {
+	return sharedPersistence.NewTxManager(db)
 }

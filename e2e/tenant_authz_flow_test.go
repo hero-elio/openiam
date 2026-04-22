@@ -18,17 +18,11 @@ import (
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
 
-	"openiam/internal/authz"
-	authzCmd "openiam/internal/authz/application/command"
-	authzQuery "openiam/internal/authz/application/query"
-	authzDomain "openiam/internal/authz/domain"
-	identity "openiam/internal/identity"
-	identityCmd "openiam/internal/identity/application/command"
 	shared "openiam/internal/shared/domain"
-	"openiam/internal/shared/infra/eventbus"
-	sharedPersistence "openiam/internal/shared/infra/persistence"
-	tenant "openiam/internal/tenant"
-	tenantCmd "openiam/internal/tenant/application/command"
+	"openiam/pkg/iam"
+	"openiam/pkg/iam/authz"
+	"openiam/pkg/iam/identity"
+	"openiam/pkg/iam/tenant"
 )
 
 func setupPostgres(t *testing.T) (dsn string, cleanup func()) {
@@ -94,24 +88,30 @@ func TestE2E_TenantAuthzIdentityFlow(t *testing.T) {
 	defer db.Close()
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	bus := eventbus.NewMemoryEventBus(logger)
-	txMgr := sharedPersistence.NewTxManager(db)
-
-	authorizer, err := authz.NewAuthorizer(db, bus, txMgr)
+	engine, err := iam.New(iam.Config{
+		Logger:   logger,
+		Postgres: &iam.PostgresConfig{DB: db},
+		Tenant:   &iam.TenantConfig{},
+		Identity: &iam.IdentityConfig{},
+		Authz:    &iam.AuthzConfig{},
+	})
 	if err != nil {
-		t.Fatalf("init authz: %v", err)
+		t.Fatalf("build engine: %v", err)
 	}
-	tenantMgr := tenant.NewManager(db, bus, txMgr)
-	identityReg := identity.NewRegistry(db, bus, txMgr, tenant.NewScopeAdapter(tenantMgr))
+	defer engine.Close()
+
+	tenantSvc := engine.Tenant.Service
+	identitySvc := engine.Identity.Service
+	authzSvc := engine.Authz.Service
 
 	ctx := context.Background()
-	tenantID, err := tenantMgr.Service.CreateTenant(ctx, &tenantCmd.CreateTenant{Name: "acme"})
+	tenantID, err := tenantSvc.CreateTenant(ctx, &tenant.CreateTenantCommand{Name: "acme"})
 	if err != nil {
 		t.Fatalf("create tenant: %v", err)
 	}
 
 	creatorID := shared.NewUserID()
-	appRes, err := tenantMgr.Service.CreateApplication(ctx, &tenantCmd.CreateApplication{
+	appRes, err := tenantSvc.CreateApplication(ctx, &tenant.CreateApplicationCommand{
 		TenantID:  tenantID.String(),
 		Name:      "portal",
 		CreatedBy: creatorID.String(),
@@ -121,7 +121,7 @@ func TestE2E_TenantAuthzIdentityFlow(t *testing.T) {
 	}
 	appID := appRes.Application.ID
 
-	roles, err := authorizer.Service.ListRoles(ctx, &authzQuery.ListRoles{AppID: appID})
+	roles, err := authzSvc.ListRoles(ctx, &authz.ListRolesQuery{AppID: appID})
 	if err != nil {
 		t.Fatalf("list roles: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestE2E_TenantAuthzIdentityFlow(t *testing.T) {
 		}
 	}
 
-	creatorRoles, err := authorizer.Service.ListUserRoles(ctx, &authzQuery.ListUserRoles{
+	creatorRoles, err := authzSvc.ListUserRoles(ctx, &authz.ListUserRolesQuery{
 		UserID: creatorID.String(),
 		AppID:  appID,
 	})
@@ -155,19 +155,19 @@ func TestE2E_TenantAuthzIdentityFlow(t *testing.T) {
 		t.Fatalf("expected creator role super_admin, got %q", roleByID[creatorRoles[0].RoleID])
 	}
 
-	defs, err := authorizer.Service.ListPermissionDefinitions(ctx, &authzQuery.ListPermissionDefinitions{AppID: appID})
+	defs, err := authzSvc.ListPermissionDefinitions(ctx, &authz.ListPermissionDefinitionsQuery{AppID: appID})
 	if err != nil {
 		t.Fatalf("list permission definitions: %v", err)
 	}
-	if len(defs) != len(authzDomain.BuiltinPermissions) {
-		t.Fatalf("expected %d builtin permission definitions, got %d", len(authzDomain.BuiltinPermissions), len(defs))
+	if len(defs) != len(authz.BuiltinPermissions) {
+		t.Fatalf("expected %d builtin permission definitions, got %d", len(authz.BuiltinPermissions), len(defs))
 	}
 
-	allowed, err := authorizer.Service.CheckPermission(ctx, &authzQuery.CheckPermission{
+	allowed, err := authzSvc.CheckPermission(ctx, &authz.CheckPermissionQuery{
 		UserID:   creatorID.String(),
 		AppID:    appID,
-		Resource: authzDomain.ResourceUsers,
-		Action:   authzDomain.ActionDelete,
+		Resource: "users",
+		Action:   "delete",
 	})
 	if err != nil {
 		t.Fatalf("check creator permission: %v", err)
@@ -176,7 +176,7 @@ func TestE2E_TenantAuthzIdentityFlow(t *testing.T) {
 		t.Fatalf("expected creator super_admin permission to be allowed")
 	}
 
-	memberUserID, err := identityReg.Service.RegisterExternalUser(ctx, &identityCmd.RegisterExternalUser{
+	memberUserID, err := identitySvc.RegisterExternalUser(ctx, &identity.RegisterExternalUserCommand{
 		AppID:             appID,
 		TenantID:          tenantID.String(),
 		Provider:          "siwe",
@@ -187,7 +187,7 @@ func TestE2E_TenantAuthzIdentityFlow(t *testing.T) {
 		t.Fatalf("register external user: %v", err)
 	}
 
-	memberRoles, err := authorizer.Service.ListUserRoles(ctx, &authzQuery.ListUserRoles{
+	memberRoles, err := authzSvc.ListUserRoles(ctx, &authz.ListUserRolesQuery{
 		UserID: memberUserID.String(),
 		AppID:  appID,
 	})
@@ -202,7 +202,7 @@ func TestE2E_TenantAuthzIdentityFlow(t *testing.T) {
 	}
 
 	// 1) Register a custom permission definition (permission registry)
-	if err := authorizer.Service.RegisterPermission(ctx, &authzCmd.RegisterPermission{
+	if err := authzSvc.RegisterPermission(ctx, &authz.RegisterPermissionCommand{
 		AppID:       appID,
 		Resource:    "documents",
 		Action:      "approve",
@@ -211,7 +211,7 @@ func TestE2E_TenantAuthzIdentityFlow(t *testing.T) {
 		t.Fatalf("register custom permission definition: %v", err)
 	}
 
-	defs, err = authorizer.Service.ListPermissionDefinitions(ctx, &authzQuery.ListPermissionDefinitions{AppID: appID})
+	defs, err = authzSvc.ListPermissionDefinitions(ctx, &authz.ListPermissionDefinitionsQuery{AppID: appID})
 	if err != nil {
 		t.Fatalf("list permission definitions after register: %v", err)
 	}
@@ -227,7 +227,7 @@ func TestE2E_TenantAuthzIdentityFlow(t *testing.T) {
 	}
 
 	// 2) Create a custom role
-	customRoleID, err := authorizer.Service.CreateRole(ctx, &authzCmd.CreateRole{
+	customRoleID, err := authzSvc.CreateRole(ctx, &authz.CreateRoleCommand{
 		AppID:       appID,
 		TenantID:    tenantID.String(),
 		Name:        "reviewer",
@@ -238,7 +238,7 @@ func TestE2E_TenantAuthzIdentityFlow(t *testing.T) {
 	}
 
 	// 3) Grant permission to the role
-	if err := authorizer.Service.GrantPermission(ctx, &authzCmd.GrantPermission{
+	if err := authzSvc.GrantPermission(ctx, &authz.GrantPermissionCommand{
 		RoleID:   customRoleID.String(),
 		Resource: "documents",
 		Action:   "approve",
@@ -246,7 +246,7 @@ func TestE2E_TenantAuthzIdentityFlow(t *testing.T) {
 		t.Fatalf("grant documents:approve to reviewer role: %v", err)
 	}
 
-	roles, err = authorizer.Service.ListRoles(ctx, &authzQuery.ListRoles{AppID: appID})
+	roles, err = authzSvc.ListRoles(ctx, &authz.ListRolesQuery{AppID: appID})
 	if err != nil {
 		t.Fatalf("list roles after custom role setup: %v", err)
 	}
@@ -266,7 +266,7 @@ func TestE2E_TenantAuthzIdentityFlow(t *testing.T) {
 	}
 
 	// 4) Assign the role to a user
-	if err := authorizer.Service.AssignRole(ctx, &authzCmd.AssignRole{
+	if err := authzSvc.AssignRole(ctx, &authz.AssignRoleCommand{
 		UserID:   memberUserID.String(),
 		AppID:    appID,
 		RoleID:   customRoleID.String(),
@@ -275,7 +275,7 @@ func TestE2E_TenantAuthzIdentityFlow(t *testing.T) {
 		t.Fatalf("assign reviewer role to member user: %v", err)
 	}
 
-	allowedViaRole, err := authorizer.Service.CheckPermission(ctx, &authzQuery.CheckPermission{
+	allowedViaRole, err := authzSvc.CheckPermission(ctx, &authz.CheckPermissionQuery{
 		UserID:   memberUserID.String(),
 		AppID:    appID,
 		Resource: "documents",
@@ -289,7 +289,7 @@ func TestE2E_TenantAuthzIdentityFlow(t *testing.T) {
 	}
 
 	// 5) Grant resource-level permission (ACL) to the user
-	if err := authorizer.Service.GrantResourcePermission(ctx, &authzCmd.GrantResourcePermission{
+	if err := authzSvc.GrantResourcePermission(ctx, &authz.GrantResourcePermissionCommand{
 		UserID:       memberUserID.String(),
 		AppID:        appID,
 		TenantID:     tenantID.String(),
@@ -301,7 +301,7 @@ func TestE2E_TenantAuthzIdentityFlow(t *testing.T) {
 		t.Fatalf("grant resource permission invoice:inv-001:read: %v", err)
 	}
 
-	allowedResource, err := authorizer.Service.CheckResourcePermission(ctx, &authzQuery.CheckResourcePermission{
+	allowedResource, err := authzSvc.CheckResourcePermission(ctx, &authz.CheckResourcePermissionQuery{
 		UserID:       memberUserID.String(),
 		AppID:        appID,
 		ResourceType: "invoice",
@@ -315,7 +315,7 @@ func TestE2E_TenantAuthzIdentityFlow(t *testing.T) {
 		t.Fatalf("expected invoice inv-001 read to be allowed via resource-level grant")
 	}
 
-	aclList, err := authorizer.Service.ListResourcePermissions(ctx, &authzQuery.ListResourcePermissions{
+	aclList, err := authzSvc.ListResourcePermissions(ctx, &authz.ListResourcePermissionsQuery{
 		UserID: memberUserID.String(),
 		AppID:  appID,
 	})
@@ -334,7 +334,7 @@ func TestE2E_TenantAuthzIdentityFlow(t *testing.T) {
 	}
 
 	// 6) Reverse validation: permission should be denied after role permission revoke
-	if err := authorizer.Service.RevokePermission(ctx, &authzCmd.RevokePermission{
+	if err := authzSvc.RevokePermission(ctx, &authz.RevokePermissionCommand{
 		RoleID:   customRoleID.String(),
 		Resource: "documents",
 		Action:   "approve",
@@ -342,7 +342,7 @@ func TestE2E_TenantAuthzIdentityFlow(t *testing.T) {
 		t.Fatalf("revoke documents:approve from reviewer role: %v", err)
 	}
 
-	deniedViaRole, err := authorizer.Service.CheckPermission(ctx, &authzQuery.CheckPermission{
+	deniedViaRole, err := authzSvc.CheckPermission(ctx, &authz.CheckPermissionQuery{
 		UserID:   memberUserID.String(),
 		AppID:    appID,
 		Resource: "documents",
@@ -356,7 +356,7 @@ func TestE2E_TenantAuthzIdentityFlow(t *testing.T) {
 	}
 
 	// 7) Reverse validation: ACL permission should be denied after revoke
-	if err := authorizer.Service.RevokeResourcePermission(ctx, &authzCmd.RevokeResourcePermission{
+	if err := authzSvc.RevokeResourcePermission(ctx, &authz.RevokeResourcePermissionCommand{
 		UserID:       memberUserID.String(),
 		AppID:        appID,
 		ResourceType: "invoice",
@@ -366,7 +366,7 @@ func TestE2E_TenantAuthzIdentityFlow(t *testing.T) {
 		t.Fatalf("revoke resource permission invoice:inv-001:read: %v", err)
 	}
 
-	deniedResource, err := authorizer.Service.CheckResourcePermission(ctx, &authzQuery.CheckResourcePermission{
+	deniedResource, err := authzSvc.CheckResourcePermission(ctx, &authz.CheckResourcePermissionQuery{
 		UserID:       memberUserID.String(),
 		AppID:        appID,
 		ResourceType: "invoice",

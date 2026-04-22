@@ -28,6 +28,12 @@ type EventHandler = shared.EventHandler
 // DomainEvent is the marker every published event implements.
 type DomainEvent = shared.DomainEvent
 
+// TxManager is re-exported here so SDK consumers wiring modules
+// manually have a public name to reference. The default Postgres
+// implementation lives in pkg/iam/adapters/postgres.TxManager; the
+// in-memory adapter ships a no-op variant suitable for tests.
+type TxManager = shared.TxManager
+
 // MemoryBus is a synchronous in-process bus useful for tests, embedded
 // use, and any deployment that does not require cross-process delivery.
 type MemoryBus = internalbus.MemoryEventBus
