@@ -518,6 +518,16 @@ func writeBusinessError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusConflict, "permission_already_granted", "permission already granted")
 	case errors.Is(err, authzDomain.ErrSystemRoleProtected):
 		writeError(w, http.StatusForbidden, "system_role_protected", "system role cannot be modified")
+	case errors.Is(err, authzDomain.ErrRoleAppMismatch):
+		writeError(w, http.StatusBadRequest, "role_app_mismatch", "role does not belong to the target app")
+	case errors.Is(err, authzDomain.ErrUnknownSubject):
+		// 422 — request was syntactically valid but referenced a
+		// user/app the system can't resolve. Distinguishing this from
+		// a 404 on the grant resource itself helps clients tell
+		// "wrong target" from "no such grant".
+		writeError(w, http.StatusUnprocessableEntity, "unknown_subject", "user or application does not exist")
+	case errors.Is(err, shared.ErrInvalidInput):
+		writeError(w, http.StatusBadRequest, "invalid_argument", "invalid request")
 	case errors.Is(err, shared.ErrNotFound):
 		writeError(w, http.StatusNotFound, "not_found", "resource not found")
 	case errors.Is(err, shared.ErrConcurrentUpdate):

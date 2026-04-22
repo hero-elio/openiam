@@ -13,6 +13,7 @@ import (
 	// route table and the seeded BuiltinPermissions in lockstep.
 	authzKeys "openiam/internal/authz/domain"
 	sharedAuth "openiam/internal/shared/auth"
+	shared "openiam/internal/shared/domain"
 	"openiam/internal/tenant/application"
 	"openiam/internal/tenant/application/command"
 	"openiam/internal/tenant/application/query"
@@ -224,8 +225,17 @@ func writeBusinessError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusNotFound, "tenant_not_found", "tenant not found")
 	case errors.Is(err, domain.ErrAppNotFound):
 		writeError(w, http.StatusNotFound, "application_not_found", "application not found")
+	case errors.Is(err, domain.ErrTenantAlreadyExists):
+		writeError(w, http.StatusConflict, "tenant_already_exists", "tenant already exists")
+	case errors.Is(err, domain.ErrAppAlreadyExists):
+		writeError(w, http.StatusConflict, "application_already_exists", "application already exists")
 	case errors.Is(err, domain.ErrClientIDTaken):
 		writeError(w, http.StatusConflict, "client_id_taken", "client id already taken")
+	case errors.Is(err, shared.ErrConcurrentUpdate):
+		// Optimistic-lock conflict — caller should reload and retry.
+		writeError(w, http.StatusConflict, "conflict", "resource was modified concurrently, please retry")
+	case errors.Is(err, shared.ErrInvalidInput):
+		writeError(w, http.StatusBadRequest, "invalid_argument", "invalid request")
 	default:
 		log.Printf("tenant handler: unhandled error: %v", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "internal server error")
