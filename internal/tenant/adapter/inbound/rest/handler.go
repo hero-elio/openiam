@@ -18,6 +18,7 @@ import (
 	"openiam/internal/tenant/application/command"
 	"openiam/internal/tenant/application/query"
 	"openiam/internal/tenant/domain"
+	"openiam/pkg/httpx"
 )
 
 type Handler struct {
@@ -59,8 +60,8 @@ func (h *Handler) ApplicationRoutes() chi.Router {
 
 func (h *Handler) handleCreateTenant(w http.ResponseWriter, r *http.Request) {
 	var req CreateTenantRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "invalid request body")
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
 	if req.Name == "" {
@@ -104,8 +105,8 @@ func (h *Handler) handleCreateApplication(w http.ResponseWriter, r *http.Request
 	}
 
 	var req CreateApplicationRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "invalid request body")
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
 	if req.Name == "" {
@@ -190,8 +191,8 @@ func (h *Handler) handleUpdateApplication(w http.ResponseWriter, r *http.Request
 	aid := chi.URLParam(r, "aid")
 
 	var req UpdateApplicationRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "invalid request body")
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
 

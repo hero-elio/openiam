@@ -15,6 +15,7 @@ import (
 	"openiam/internal/authz/application/query"
 	authzDomain "openiam/internal/authz/domain"
 	sharedAuth "openiam/internal/shared/auth"
+	"openiam/pkg/httpx"
 )
 
 type Handler struct {
@@ -71,8 +72,8 @@ func (h *Handler) Routes() chi.Router {
 
 func (h *Handler) handleCreateRole(w http.ResponseWriter, r *http.Request) {
 	var req CreateRoleRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "invalid request body")
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
 
@@ -140,8 +141,8 @@ func (h *Handler) handleGrantPermission(w http.ResponseWriter, r *http.Request) 
 	roleID := chi.URLParam(r, "id")
 
 	var req GrantPermissionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "invalid request body")
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
 
@@ -167,8 +168,8 @@ func (h *Handler) handleRevokePermission(w http.ResponseWriter, r *http.Request)
 	roleID := chi.URLParam(r, "id")
 
 	var req RevokePermissionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "invalid request body")
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
 
@@ -189,8 +190,8 @@ func (h *Handler) handleAssignRole(w http.ResponseWriter, r *http.Request) {
 	userID := chi.URLParam(r, "uid")
 
 	var req AssignRoleRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "invalid request body")
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
 
@@ -275,8 +276,8 @@ func (h *Handler) handleListUserRoles(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) handleCheckPermission(w http.ResponseWriter, r *http.Request) {
 	var req CheckPermissionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "invalid request body")
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
 
@@ -307,8 +308,8 @@ func (h *Handler) handleGrantResourcePermission(w http.ResponseWriter, r *http.R
 	}
 
 	var req GrantResourcePermissionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "invalid request body")
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
 
@@ -336,8 +337,8 @@ func (h *Handler) handleGrantResourcePermission(w http.ResponseWriter, r *http.R
 
 func (h *Handler) handleRevokeResourcePermission(w http.ResponseWriter, r *http.Request) {
 	var req RevokeResourcePermissionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "invalid request body")
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
 
@@ -358,8 +359,8 @@ func (h *Handler) handleRevokeResourcePermission(w http.ResponseWriter, r *http.
 
 func (h *Handler) handleCheckResourcePermission(w http.ResponseWriter, r *http.Request) {
 	var req CheckResourcePermissionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "invalid request body")
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
 
@@ -420,8 +421,8 @@ func (h *Handler) handleListResourcePermissions(w http.ResponseWriter, r *http.R
 
 func (h *Handler) handleRegisterPermission(w http.ResponseWriter, r *http.Request) {
 	var req RegisterPermissionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "invalid request body")
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
 
@@ -475,8 +476,8 @@ func (h *Handler) handleListPermissionDefinitions(w http.ResponseWriter, r *http
 
 func (h *Handler) handleDeletePermission(w http.ResponseWriter, r *http.Request) {
 	var req DeletePermissionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "invalid request body")
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
 
