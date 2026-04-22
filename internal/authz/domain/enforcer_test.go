@@ -17,7 +17,7 @@ func (f *fakeRoleRepo) Save(context.Context, *Role) error { return nil }
 
 func (f *fakeRoleRepo) FindByID(context.Context, shared.RoleID) (*Role, error) { return nil, nil }
 
-func (f *fakeRoleRepo) FindByName(context.Context, shared.AppID, string) (*Role, error) {
+func (f *fakeRoleRepo) FindByName(context.Context, shared.AppID, shared.TenantID, string) (*Role, error) {
 	return nil, nil
 }
 

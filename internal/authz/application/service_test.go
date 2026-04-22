@@ -25,7 +25,7 @@ func (f *fakeRoleRepo) FindByID(context.Context, shared.RoleID) (*domain.Role, e
 	return f.role, nil
 }
 
-func (f *fakeRoleRepo) FindByName(context.Context, shared.AppID, string) (*domain.Role, error) {
+func (f *fakeRoleRepo) FindByName(context.Context, shared.AppID, shared.TenantID, string) (*domain.Role, error) {
 	return nil, domain.ErrRoleNotFound
 }
 

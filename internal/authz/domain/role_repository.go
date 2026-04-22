@@ -9,7 +9,7 @@ import (
 type RoleRepository interface {
 	Save(ctx context.Context, role *Role) error
 	FindByID(ctx context.Context, id shared.RoleID) (*Role, error)
-	FindByName(ctx context.Context, appID shared.AppID, name string) (*Role, error)
+	FindByName(ctx context.Context, appID shared.AppID, tenantID shared.TenantID, name string) (*Role, error)
 	FindByUserAndApp(ctx context.Context, userID shared.UserID, appID shared.AppID) ([]*Role, error)
 	ListByApp(ctx context.Context, appID shared.AppID) ([]*Role, error)
 	Delete(ctx context.Context, id shared.RoleID) error

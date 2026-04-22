@@ -40,7 +40,7 @@ func (f *fakeRoleRepo) FindByID(context.Context, shared.RoleID) (*authzDomain.Ro
 	return nil, shared.ErrNotFound
 }
 
-func (f *fakeRoleRepo) FindByName(_ context.Context, appID shared.AppID, name string) (*authzDomain.Role, error) {
+func (f *fakeRoleRepo) FindByName(_ context.Context, appID shared.AppID, _ shared.TenantID, name string) (*authzDomain.Role, error) {
 	if f.findByNameErr != nil {
 		return nil, f.findByNameErr
 	}

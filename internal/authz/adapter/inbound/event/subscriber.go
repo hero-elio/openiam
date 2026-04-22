@@ -69,7 +69,7 @@ func (s *Subscriber) onUserRegistered(ctx context.Context, evt shared.DomainEven
 	tenantID := payload.GetTenantID()
 	appID := payload.GetAppID()
 
-	memberRole, err := s.roleRepo.FindByName(ctx, appID, defaultRoleName)
+	memberRole, err := s.roleRepo.FindByName(ctx, appID, tenantID, defaultRoleName)
 	if err != nil {
 		if !errors.Is(err, domain.ErrRoleNotFound) {
 			return err
@@ -162,7 +162,7 @@ func (s *Subscriber) seedRolesFromTemplates(ctx context.Context, appID shared.Ap
 	var creatorRole *domain.Role
 
 	for _, tmpl := range templates {
-		existing, err := s.roleRepo.FindByName(ctx, appID, tmpl.Name)
+		existing, err := s.roleRepo.FindByName(ctx, appID, tenantID, tmpl.Name)
 		if err == nil && existing != nil {
 			if tmpl.IsDefaultForCreator {
 				creatorRole = existing

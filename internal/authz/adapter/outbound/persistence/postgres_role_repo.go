@@ -114,13 +114,15 @@ func (r *PostgresRoleRepository) FindByID(ctx context.Context, id shared.RoleID)
 	return rowToRole(row, perms), nil
 }
 
-func (r *PostgresRoleRepository) FindByName(ctx context.Context, appID shared.AppID, name string) (*domain.Role, error) {
+func (r *PostgresRoleRepository) FindByName(ctx context.Context, appID shared.AppID, tenantID shared.TenantID, name string) (*domain.Role, error) {
 	conn := sharedPersistence.Conn(ctx, r.db)
 
+	// The unique constraint is (app_id, tenant_id, name); searching by
+	// (app_id, name) alone could return multiple rows across tenants.
 	var row roleRow
 	err := sqlx.GetContext(ctx, conn, &row,
-		`SELECT * FROM roles WHERE app_id = $1 AND name = $2`,
-		appID.String(), name)
+		`SELECT * FROM roles WHERE app_id = $1 AND tenant_id = $2 AND name = $3`,
+		appID.String(), tenantID.String(), name)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, domain.ErrRoleNotFound

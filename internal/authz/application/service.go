@@ -95,7 +95,7 @@ func (s *AuthzAppService) CreateRole(ctx context.Context, cmd *command.CreateRol
 	role := domain.NewRole(appID, tenantID, name, cmd.Description)
 
 	if err := s.txManager.Execute(ctx, func(txCtx context.Context) error {
-		existing, err := s.roleRepo.FindByName(txCtx, appID, name)
+		existing, err := s.roleRepo.FindByName(txCtx, appID, tenantID, name)
 		if err != nil && err != domain.ErrRoleNotFound {
 			return err
 		}
