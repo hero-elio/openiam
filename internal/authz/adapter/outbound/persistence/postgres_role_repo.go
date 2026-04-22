@@ -51,17 +51,22 @@ func NewPostgresRoleRepository(db *sqlx.DB) *PostgresRoleRepository {
 func (r *PostgresRoleRepository) Save(ctx context.Context, role *domain.Role) error {
 	conn := sharedPersistence.Conn(ctx, r.db)
 
+	// Optimistic lock: ON CONFLICT only updates when the persisted version
+	// matches the loaded snapshot ($9). Stale writes get 0 rows affected
+	// and we report ErrConcurrentUpdate instead of silently clobbering
+	// concurrent permission changes on the same role.
 	const upsertRole = `
 		INSERT INTO roles (id, app_id, tenant_id, name, description, is_system, is_template, is_default_for_creator, version, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $10, $11)
 		ON CONFLICT (id) DO UPDATE SET
 			name = EXCLUDED.name,
 			description = EXCLUDED.description,
 			is_template = EXCLUDED.is_template,
 			is_default_for_creator = EXCLUDED.is_default_for_creator,
-			version = EXCLUDED.version`
+			version = roles.version + 1
+		WHERE roles.version = $9`
 
-	if _, err := conn.ExecContext(ctx, upsertRole,
+	res, err := conn.ExecContext(ctx, upsertRole,
 		role.ID.String(),
 		role.AppID.String(),
 		role.TenantID.String(),
@@ -70,10 +75,19 @@ func (r *PostgresRoleRepository) Save(ctx context.Context, role *domain.Role) er
 		role.IsSystem,
 		role.IsTemplate,
 		role.IsDefaultForCreator,
+		role.Version,
 		role.Version+1,
 		role.CreatedAt,
-	); err != nil {
+	)
+	if err != nil {
 		return err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return shared.ErrConcurrentUpdate
 	}
 
 	if _, err := conn.ExecContext(ctx,
@@ -91,6 +105,7 @@ func (r *PostgresRoleRepository) Save(ctx context.Context, role *domain.Role) er
 		}
 	}
 
+	role.Version++
 	return nil
 }
 

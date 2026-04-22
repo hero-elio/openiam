@@ -13,6 +13,7 @@ import (
 	"openiam/internal/identity/application/command"
 	"openiam/internal/identity/application/query"
 	"openiam/internal/identity/domain"
+	shared "openiam/internal/shared/domain"
 )
 
 type Handler struct {
@@ -187,6 +188,8 @@ func writeBusinessError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusBadRequest, "invalid_input", "invalid input")
 	case errors.Is(err, domain.ErrInvalidPassword):
 		writeError(w, http.StatusUnauthorized, "invalid_password", "invalid password")
+	case errors.Is(err, shared.ErrConcurrentUpdate):
+		writeError(w, http.StatusConflict, "conflict", "user was modified concurrently, please retry")
 	default:
 		log.Printf("identity handler: unhandled error: %v", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "internal server error")

@@ -36,29 +36,47 @@ func NewPostgresUserRepository(db *sqlx.DB) *PostgresUserRepository {
 func (r *PostgresUserRepository) Save(ctx context.Context, user *domain.User) error {
 	conn := sharedPersistence.Conn(ctx, r.db)
 
+	// Optimistic lock: the ON CONFLICT branch only fires when the persisted
+	// row's version matches what we loaded ($7). A mismatch leaves the row
+	// untouched, RowsAffected returns 0, and we surface ErrConcurrentUpdate
+	// so the caller can retry against the latest snapshot instead of
+	// silently overwriting somebody else's update.
 	const upsert = `
 		INSERT INTO users (id, tenant_id, email, password_hash, display_name, status, version, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		VALUES ($1, $2, $3, $4, $5, $6, $8, $9, $10)
 		ON CONFLICT (id) DO UPDATE SET
 			email = EXCLUDED.email,
 			password_hash = EXCLUDED.password_hash,
 			display_name = EXCLUDED.display_name,
 			status = EXCLUDED.status,
-			version = EXCLUDED.version,
-			updated_at = EXCLUDED.updated_at`
+			version = users.version + 1,
+			updated_at = EXCLUDED.updated_at
+		WHERE users.version = $7`
 
-	_, err := conn.ExecContext(ctx, upsert,
+	res, err := conn.ExecContext(ctx, upsert,
 		user.ID.String(),
 		user.TenantID.String(),
 		user.Email.String(),
 		user.Password.Hash(),
 		user.Profile.DisplayName,
 		string(user.Status),
+		user.Version,
 		user.Version+1,
 		user.CreatedAt,
 		user.UpdatedAt,
 	)
-	return err
+	if err != nil {
+		return err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return shared.ErrConcurrentUpdate
+	}
+	user.Version++
+	return nil
 }
 
 func (r *PostgresUserRepository) FindByID(ctx context.Context, id shared.UserID) (*domain.User, error) {

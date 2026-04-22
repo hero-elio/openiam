@@ -517,6 +517,8 @@ func writeBusinessError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusForbidden, "system_role_protected", "system role cannot be modified")
 	case errors.Is(err, shared.ErrNotFound):
 		writeError(w, http.StatusNotFound, "not_found", "resource not found")
+	case errors.Is(err, shared.ErrConcurrentUpdate):
+		writeError(w, http.StatusConflict, "conflict", "resource was modified concurrently, please retry")
 	default:
 		log.Printf("authz handler: unhandled error: %v", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "internal server error")

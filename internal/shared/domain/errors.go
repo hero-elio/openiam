@@ -8,4 +8,7 @@ var (
 	ErrInvalidInput  = errors.New("invalid input")
 	ErrUnauthorized  = errors.New("unauthorized")
 	ErrForbidden     = errors.New("forbidden")
+	// ErrConcurrentUpdate signals an optimistic-locking conflict: the
+	// caller's snapshot is stale relative to the persisted aggregate.
+	ErrConcurrentUpdate = errors.New("concurrent update detected")
 )
