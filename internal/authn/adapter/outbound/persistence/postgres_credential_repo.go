@@ -4,14 +4,22 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/lib/pq"
 
 	"openiam/internal/authn/domain"
 	shared "openiam/internal/shared/domain"
 	sharedpersistence "openiam/internal/shared/infra/persistence"
 )
+
+// pgUniqueViolation is the SQLSTATE code postgres returns when a UNIQUE
+// constraint is violated. We map it to a domain error so callers can
+// surface "this credential is already bound" instead of leaking the raw
+// driver error.
+const pgUniqueViolation = "23505"
 
 type PostgresCredentialRepo struct {
 	db *sqlx.DB
@@ -32,7 +40,9 @@ type credentialRow struct {
 	PublicKey         sql.NullString `db:"public_key"`
 	Metadata          []byte         `db:"metadata"`
 	CreatedAt         time.Time      `db:"created_at"`
-	LastUsedAt        time.Time      `db:"last_used_at"`
+	// last_used_at is nullable in the schema (a freshly issued credential
+	// has never been used). A bare time.Time would Scan-fail on NULL.
+	LastUsedAt sql.NullTime `db:"last_used_at"`
 }
 
 const credentialColumns = `id, user_id, app_id, type, provider, credential_subject, secret, public_key, metadata, created_at, last_used_at`
@@ -58,9 +68,21 @@ func (r *PostgresCredentialRepo) Save(ctx context.Context, cred *domain.Credenti
 		toNullString(cred.PublicKey),
 		meta,
 		cred.CreatedAt,
-		cred.LastUsedAt,
+		nullTime(cred.LastUsedAt),
 	)
-	return err
+	if err != nil {
+		// (app_id, credential_subject, type) is UNIQUE — a concurrent
+		// SIWE/WebAuthn registration for the same address could race past
+		// our application-level check and reach here. Surface it as a
+		// domain error so callers can treat the duplicate as already-bound
+		// instead of leaking the raw pq error.
+		var pgErr *pq.Error
+		if errors.As(err, &pgErr) && string(pgErr.Code) == pgUniqueViolation {
+			return domain.ErrCredentialAlreadyBound
+		}
+		return err
+	}
+	return nil
 }
 
 func (r *PostgresCredentialRepo) FindByID(ctx context.Context, id shared.CredentialID) (*domain.Credential, error) {
@@ -69,7 +91,7 @@ func (r *PostgresCredentialRepo) FindByID(ctx context.Context, id shared.Credent
 	err := sqlx.GetContext(ctx, conn, &row,
 		`SELECT `+credentialColumns+` FROM credentials WHERE id = $1`, id.String())
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil, domain.ErrCredentialNotFound
 		}
 		return nil, err
@@ -84,7 +106,7 @@ func (r *PostgresCredentialRepo) FindByUserAndType(ctx context.Context, userID s
 		`SELECT `+credentialColumns+` FROM credentials WHERE user_id = $1 AND app_id = $2 AND type = $3`,
 		userID.String(), appID.String(), string(credType))
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil, domain.ErrCredentialNotFound
 		}
 		return nil, err
@@ -99,7 +121,7 @@ func (r *PostgresCredentialRepo) FindBySubjectAndType(ctx context.Context, subje
 		`SELECT `+credentialColumns+` FROM credentials WHERE credential_subject = $1 AND app_id = $2 AND type = $3`,
 		subject, appID.String(), string(credType))
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil, domain.ErrCredentialNotFound
 		}
 		return nil, err
@@ -119,7 +141,7 @@ func (r *PostgresCredentialRepo) Update(ctx context.Context, cred *domain.Creden
 		toNullString(cred.Secret),
 		toNullString(cred.PublicKey),
 		meta,
-		cred.LastUsedAt,
+		nullTime(cred.LastUsedAt),
 		cred.ID.String(),
 	)
 	return err
@@ -160,7 +182,9 @@ func rowToCredential(row credentialRow) (*domain.Credential, error) {
 		Provider:          row.Provider,
 		CredentialSubject: row.CredentialSubject,
 		CreatedAt:         row.CreatedAt,
-		LastUsedAt:        row.LastUsedAt,
+	}
+	if row.LastUsedAt.Valid {
+		cred.LastUsedAt = row.LastUsedAt.Time
 	}
 	if row.Secret.Valid {
 		cred.Secret = &row.Secret.String
@@ -184,4 +208,15 @@ func toNullString(s *string) sql.NullString {
 		return sql.NullString{}
 	}
 	return sql.NullString{String: *s, Valid: true}
+}
+
+// nullTime maps a zero time.Time to SQL NULL so a freshly-issued
+// credential persists as last_used_at IS NULL instead of "0001-01-01",
+// keeping the on-disk representation consistent with what readers
+// observe via sql.NullTime.
+func nullTime(t time.Time) sql.NullTime {
+	if t.IsZero() {
+		return sql.NullTime{}
+	}
+	return sql.NullTime{Time: t, Valid: true}
 }
