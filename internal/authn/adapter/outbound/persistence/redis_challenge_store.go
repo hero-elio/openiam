@@ -2,6 +2,7 @@ package persistence
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -26,7 +27,7 @@ func (s *RedisChallengeStore) Save(ctx context.Context, challengeID string, data
 func (s *RedisChallengeStore) Get(ctx context.Context, challengeID string) ([]byte, error) {
 	data, err := s.rdb.Get(ctx, prefixChallenge+challengeID).Bytes()
 	if err != nil {
-		if err == redis.Nil {
+		if errors.Is(err, redis.Nil) {
 			return nil, domain.ErrChallengeNotFound
 		}
 		return nil, err

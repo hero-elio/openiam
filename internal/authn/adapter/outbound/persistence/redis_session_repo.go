@@ -3,6 +3,7 @@ package persistence
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -62,7 +63,7 @@ func (r *RedisSessionRepo) Save(ctx context.Context, session *domain.Session) er
 func (r *RedisSessionRepo) FindByID(ctx context.Context, id shared.SessionID) (*domain.Session, error) {
 	data, err := r.rdb.Get(ctx, prefixSessionData+id.String()).Bytes()
 	if err != nil {
-		if err == redis.Nil {
+		if errors.Is(err, redis.Nil) {
 			return nil, domain.ErrSessionNotFound
 		}
 		return nil, err
@@ -73,7 +74,7 @@ func (r *RedisSessionRepo) FindByID(ctx context.Context, id shared.SessionID) (*
 func (r *RedisSessionRepo) FindByRefreshToken(ctx context.Context, refreshToken string) (*domain.Session, error) {
 	sessionID, err := r.rdb.Get(ctx, prefixSessionRefresh+refreshToken).Result()
 	if err != nil {
-		if err == redis.Nil {
+		if errors.Is(err, redis.Nil) {
 			return nil, domain.ErrSessionNotFound
 		}
 		return nil, err
@@ -84,7 +85,7 @@ func (r *RedisSessionRepo) FindByRefreshToken(ctx context.Context, refreshToken 
 func (r *RedisSessionRepo) Update(ctx context.Context, session *domain.Session) error {
 	oldData, err := r.rdb.Get(ctx, prefixSessionData+session.ID.String()).Bytes()
 	if err != nil {
-		if err == redis.Nil {
+		if errors.Is(err, redis.Nil) {
 			return domain.ErrSessionNotFound
 		}
 		return err
@@ -117,7 +118,7 @@ func (r *RedisSessionRepo) Update(ctx context.Context, session *domain.Session) 
 func (r *RedisSessionRepo) Delete(ctx context.Context, id shared.SessionID) error {
 	data, err := r.rdb.Get(ctx, prefixSessionData+id.String()).Bytes()
 	if err != nil {
-		if err == redis.Nil {
+		if errors.Is(err, redis.Nil) {
 			return nil
 		}
 		return err
