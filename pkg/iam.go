@@ -2,6 +2,7 @@ package iam
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -204,6 +205,18 @@ func (e *Engine) Handler() http.Handler {
 	r.Use(chimw.Recoverer)
 	r.Use(chimw.Timeout(30 * time.Second))
 
+	// Liveness: cheap, no external deps. Returning 200 means the process
+	// is up and the HTTP stack is serving — that's all Kubernetes needs to
+	// stop killing the pod.
+	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+		writeHealthJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+	})
+
+	// Readiness: verify the dependencies a request actually needs. Both
+	// Postgres and Redis are pinged with the request's context so a slow
+	// dep can't pin the probe to its server-wide timeout.
+	r.Get("/readyz", e.handleReadyz)
+
 	r.Route("/api/v1", func(api chi.Router) {
 		if e.Authn != nil && e.Authn.Handler != nil {
 			api.Mount("/auth", e.Authn.Handler.Routes())
@@ -230,6 +243,48 @@ func (e *Engine) Handler() http.Handler {
 
 	e.router = r
 	return r
+}
+
+func (e *Engine) handleReadyz(w http.ResponseWriter, r *http.Request) {
+	checks := map[string]string{}
+	overall := http.StatusOK
+
+	if e.Deps.DB != nil {
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		if err := e.Deps.DB.PingContext(ctx); err != nil {
+			checks["postgres"] = "unhealthy: " + err.Error()
+			overall = http.StatusServiceUnavailable
+		} else {
+			checks["postgres"] = "ok"
+		}
+		cancel()
+	}
+
+	if e.Deps.Redis != nil {
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		if err := e.Deps.Redis.Ping(ctx).Err(); err != nil {
+			checks["redis"] = "unhealthy: " + err.Error()
+			overall = http.StatusServiceUnavailable
+		} else {
+			checks["redis"] = "ok"
+		}
+		cancel()
+	}
+
+	body := map[string]any{
+		"status": "ok",
+		"checks": checks,
+	}
+	if overall != http.StatusOK {
+		body["status"] = "degraded"
+	}
+	writeHealthJSON(w, overall, body)
+}
+
+func writeHealthJSON(w http.ResponseWriter, status int, body any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(body)
 }
 
 func (e *Engine) Close() error {
