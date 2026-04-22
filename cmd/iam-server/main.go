@@ -37,7 +37,8 @@ func main() {
 	v.SetDefault("redis.addr", "localhost:6379")
 	v.SetDefault("redis.password", "")
 	v.SetDefault("redis.db", 0)
-	v.SetDefault("jwt.secret", "change-me-in-production")
+	v.SetDefault("jwt.secret", authn.InsecureJWTSecretSentinel)
+	v.SetDefault("jwt.allow_insecure", false)
 	v.SetDefault("jwt.issuer", "openiam")
 	v.SetDefault("jwt.access_ttl", "15m")
 	v.SetDefault("jwt.refresh_ttl", "168h")
@@ -74,14 +75,15 @@ func main() {
 		iam.WithRedis(v.GetString("redis.addr"), v.GetString("redis.password"), v.GetInt("redis.db")),
 		iam.WithIdentity(),
 		iam.WithAuthn(authn.Config{
-			JWTSecret:         v.GetString("jwt.secret"),
-			JWTIssuer:         v.GetString("jwt.issuer"),
-			AccessTokenTTL:    accessTTL,
-			SessionTTL:        sessionTTL,
-			SIWEDomain:        v.GetString("siwe.domain"),
-			WebAuthnRPID:      v.GetString("webauthn.rp_id"),
-			WebAuthnRPName:    v.GetString("webauthn.rp_name"),
-			WebAuthnRPOrigins: splitAndTrim(v.GetString("webauthn.rp_origins")),
+			JWTSecret:              v.GetString("jwt.secret"),
+			JWTIssuer:              v.GetString("jwt.issuer"),
+			AccessTokenTTL:         accessTTL,
+			SessionTTL:             sessionTTL,
+			AllowInsecureJWTSecret: v.GetBool("jwt.allow_insecure"),
+			SIWEDomain:             v.GetString("siwe.domain"),
+			WebAuthnRPID:           v.GetString("webauthn.rp_id"),
+			WebAuthnRPName:         v.GetString("webauthn.rp_name"),
+			WebAuthnRPOrigins:      splitAndTrim(v.GetString("webauthn.rp_origins")),
 		}),
 		iam.WithAuthz(),
 		iam.WithTenant(),

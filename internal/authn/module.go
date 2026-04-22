@@ -25,11 +25,33 @@ type Config struct {
 	AccessTokenTTL time.Duration
 	SessionTTL     time.Duration
 
+	// AllowInsecureJWTSecret bypasses the production-grade checks on
+	// JWTSecret. Intended for tests / local hacking only; never set this
+	// to true in a real deployment.
+	AllowInsecureJWTSecret bool
+
 	SIWEDomain        string
 	WebAuthnRPID      string
 	WebAuthnRPName    string
 	WebAuthnRPOrigins []string
 }
+
+// InsecureJWTSecretSentinel is the placeholder value shipped in the
+// example config. The boot path refuses to start when JWTSecret matches
+// it (unless AllowInsecureJWTSecret is set), so a forgotten override in
+// production fails loudly instead of silently using a known-public key.
+const InsecureJWTSecretSentinel = "change-me-in-production"
+
+// MinJWTSecretLength is the minimum acceptable length for a production
+// HMAC-SHA256 JWT secret. RFC 7518 §3.2 requires the key to be at least
+// as long as the hash output (256 bits / 32 bytes); we enforce that as
+// a byte length on the raw secret.
+const MinJWTSecretLength = 32
+
+// ErrInsecureJWTSecret signals that the configured JWT secret is empty,
+// equals the publicly known placeholder, or is shorter than the minimum
+// safe length, and the caller did not explicitly opt into insecure mode.
+var ErrInsecureJWTSecret = fmt.Errorf("authn: jwt secret is missing, default, or shorter than %d bytes — set IAM_JWT_SECRET to a strong random value (or AllowInsecureJWTSecret for non-production)", MinJWTSecretLength)
 
 type Authenticator struct {
 	Service       *authnApp.AuthnAppService
@@ -76,9 +98,17 @@ func NewAuthenticator(cfg Config, deps AuthenticatorDeps) (*Authenticator, error
 	if deps.TokenProvider == nil {
 		return nil, fmt.Errorf("authn: token provider is required")
 	}
+	if !cfg.AllowInsecureJWTSecret {
+		if err := validateJWTSecret(cfg.JWTSecret); err != nil {
+			return nil, err
+		}
+	}
 	logger := deps.Logger
 	if logger == nil {
 		logger = slog.Default()
+	}
+	if cfg.AllowInsecureJWTSecret {
+		logger.Warn("authn: AllowInsecureJWTSecret is enabled — do not run this configuration in production")
 	}
 
 	id := deps.Identity
@@ -131,6 +161,19 @@ func NewAuthenticator(cfg Config, deps AuthenticatorDeps) (*Authenticator, error
 		Handler:       handler,
 		TokenProvider: deps.TokenProvider,
 	}, nil
+}
+
+func validateJWTSecret(secret string) error {
+	if secret == "" {
+		return ErrInsecureJWTSecret
+	}
+	if secret == InsecureJWTSecretSentinel {
+		return ErrInsecureJWTSecret
+	}
+	if len(secret) < MinJWTSecretLength {
+		return ErrInsecureJWTSecret
+	}
+	return nil
 }
 
 // identityBridge adapts the identity service to the authn domain interfaces

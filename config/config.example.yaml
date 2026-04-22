@@ -13,7 +13,14 @@ redis:
   db: 0
 
 jwt:
+  # MUST be replaced with a strong (>= 32 bytes) random secret before
+  # running in any non-development environment. Generate one with e.g.
+  #   openssl rand -base64 48
+  # The boot path refuses to start if this is empty, equals the
+  # placeholder below, or is shorter than 32 bytes — unless
+  # `allow_insecure: true` (only for local hacking).
   secret: "change-me-in-production"
+  allow_insecure: false
   issuer: "openiam"
   access_token_ttl: "15m"
   refresh_token_ttl: "168h"
