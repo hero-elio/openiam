@@ -241,6 +241,7 @@ func (s *AuthnAppService) RefreshToken(ctx context.Context, cmd *command.Refresh
 	}
 
 	session.Refresh(tokenPair.RefreshToken, time.Now().Add(s.sessionTTL))
+	session.RecordClient(cmd.UserAgent, cmd.IPAddress)
 	if err := s.sessionRepo.Update(ctx, session); err != nil {
 		return nil, err
 	}

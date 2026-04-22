@@ -55,6 +55,19 @@ func (s *Session) Refresh(newRefreshToken string, newExpiry time.Time) {
 	s.LastActiveAt = time.Now()
 }
 
+// RecordClient updates the request-context fields a session listing exposes
+// (UserAgent, IPAddress) when they are present. Empty values are ignored
+// so a token refresh from a client that doesn't surface them does not wipe
+// the originally captured values.
+func (s *Session) RecordClient(userAgent, ipAddress string) {
+	if userAgent != "" {
+		s.UserAgent = userAgent
+	}
+	if ipAddress != "" {
+		s.IPAddress = ipAddress
+	}
+}
+
 type TokenPair struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
