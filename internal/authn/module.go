@@ -74,6 +74,7 @@ type AuthenticatorDeps struct {
 	Challenges    authnDomain.ChallengeStore
 	EventBus      shared.EventBus
 	Identity      IdentityIntegration
+	Apps          authnDomain.AppDirectory
 	TokenProvider authnDomain.TokenProvider
 	Logger        *slog.Logger
 }
@@ -119,20 +120,26 @@ func NewAuthenticator(cfg Config, deps AuthenticatorDeps) (*Authenticator, error
 	}
 
 	if cfg.SIWEDomain != "" {
+		if deps.Apps == nil {
+			return nil, fmt.Errorf("authn: SIWE requires AppDirectory in deps to resolve tenant from app id")
+		}
 		opts = append(opts, authnApp.WithSIWEAuth(
 			authnStrategy.SIWEConfig{Domain: cfg.SIWEDomain},
-			deps.Credentials, id, deps.Challenges,
+			deps.Credentials, id, deps.Challenges, deps.Apps,
 		))
 	}
 
 	if cfg.WebAuthnRPID != "" && len(cfg.WebAuthnRPOrigins) > 0 {
+		if deps.Apps == nil {
+			return nil, fmt.Errorf("authn: WebAuthn requires AppDirectory in deps to resolve tenant from app id")
+		}
 		opts = append(opts, authnApp.WithWebAuthnAuth(
 			authnStrategy.WebAuthnConfig{
 				RPID:          cfg.WebAuthnRPID,
 				RPDisplayName: cfg.WebAuthnRPName,
 				RPOrigins:     cfg.WebAuthnRPOrigins,
 			},
-			deps.Credentials, id, deps.Challenges,
+			deps.Credentials, id, deps.Challenges, deps.Apps,
 		))
 	}
 
@@ -209,14 +216,13 @@ func (a *identityBridge) Register(ctx context.Context, req *authnDomain.Register
 }
 
 func (a *identityBridge) ProvisionExternalUser(ctx context.Context, req *authnDomain.ProvisionExternalUserRequest) (*authnDomain.UserInfo, error) {
-	tenantID := req.TenantID
-	if tenantID == "" {
-		tenantID = "default"
+	if req.TenantID.IsEmpty() {
+		return nil, fmt.Errorf("authn: ProvisionExternalUser called without TenantID — strategies must resolve the tenant via AppDirectory")
 	}
 
 	uid, err := a.svc.RegisterExternalUser(ctx, &identityCommand.RegisterExternalUser{
 		AppID:             req.AppID.String(),
-		TenantID:          string(tenantID),
+		TenantID:          string(req.TenantID),
 		Provider:          req.Provider,
 		CredentialSubject: req.CredentialSubject,
 		PublicKey:         req.PublicKey,
@@ -227,7 +233,7 @@ func (a *identityBridge) ProvisionExternalUser(ctx context.Context, req *authnDo
 
 	return &authnDomain.UserInfo{
 		UserID:   uid,
-		TenantID: tenantID,
+		TenantID: req.TenantID,
 		Status:   "active",
 	}, nil
 }

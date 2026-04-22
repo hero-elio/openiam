@@ -145,6 +145,7 @@ func WithAuthn(cfg authn.Config) Option {
 			Challenges:    authnPersistence.NewRedisChallengeStore(e.Deps.Redis),
 			EventBus:      e.Deps.EventBus,
 			Identity:      authn.NewIdentityBridge(e.Identity.Service),
+			Apps:          e.scopeValidatorOrNil(),
 			TokenProvider: jwtProvider,
 			Logger:        e.Deps.Logger,
 		})

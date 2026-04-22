@@ -37,14 +37,22 @@ type SIWEStrategy struct {
 	credRepo       authnDomain.CredentialRepository
 	identity       authnDomain.ExternalLoginIdentity
 	challengeStore authnDomain.ChallengeStore
+	apps           authnDomain.AppDirectory
 }
 
-func NewSIWEStrategy(cfg SIWEConfig, credRepo authnDomain.CredentialRepository, identity authnDomain.ExternalLoginIdentity, store authnDomain.ChallengeStore) *SIWEStrategy {
+func NewSIWEStrategy(
+	cfg SIWEConfig,
+	credRepo authnDomain.CredentialRepository,
+	identity authnDomain.ExternalLoginIdentity,
+	store authnDomain.ChallengeStore,
+	apps authnDomain.AppDirectory,
+) *SIWEStrategy {
 	return &SIWEStrategy{
 		cfg:            cfg,
 		credRepo:       credRepo,
 		identity:       identity,
 		challengeStore: store,
+		apps:           apps,
 	}
 }
 
@@ -97,9 +105,13 @@ func (s *SIWEStrategy) Authenticate(ctx context.Context, req *authnDomain.AuthnR
 		if !errors.Is(err, authnDomain.ErrCredentialNotFound) {
 			return nil, err
 		}
+		tenantID, lookupErr := s.resolveTenant(ctx, req.AppID)
+		if lookupErr != nil {
+			return nil, lookupErr
+		}
 		info, createErr := s.identity.ProvisionExternalUser(ctx, &authnDomain.ProvisionExternalUserRequest{
 			AppID:             req.AppID,
-			TenantID:          "default",
+			TenantID:          tenantID,
 			Provider:          string(authnDomain.CredentialSIWE),
 			CredentialSubject: caip10,
 		})
@@ -159,6 +171,16 @@ func (s *SIWEStrategy) VerifyAndBind(ctx context.Context, req *authnDomain.Authn
 
 	cred := authnDomain.NewCredential(userID, req.AppID, authnDomain.CredentialSIWE, string(authnDomain.CredentialSIWE), caip10)
 	return s.credRepo.Save(ctx, cred)
+}
+
+// resolveTenant looks up the tenant that owns the application via the
+// AppDirectory port. We require an AppDirectory to be wired so external
+// identities cannot leak across tenants under a hard-coded "default".
+func (s *SIWEStrategy) resolveTenant(ctx context.Context, appID shared.AppID) (shared.TenantID, error) {
+	if s.apps == nil {
+		return "", fmt.Errorf("siwe: app directory not configured; cannot resolve tenant for app %s", appID)
+	}
+	return s.apps.TenantOf(ctx, appID)
 }
 
 // verifySIWE validates a SIWE message+signature and returns the CAIP-10 subject.

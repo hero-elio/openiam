@@ -49,9 +49,16 @@ type WebAuthnStrategy struct {
 	credRepo       authnDomain.CredentialRepository
 	identity       authnDomain.ExternalLoginIdentity
 	challengeStore authnDomain.ChallengeStore
+	apps           authnDomain.AppDirectory
 }
 
-func NewWebAuthnStrategy(cfg WebAuthnConfig, credRepo authnDomain.CredentialRepository, identity authnDomain.ExternalLoginIdentity, store authnDomain.ChallengeStore) (*WebAuthnStrategy, error) {
+func NewWebAuthnStrategy(
+	cfg WebAuthnConfig,
+	credRepo authnDomain.CredentialRepository,
+	identity authnDomain.ExternalLoginIdentity,
+	store authnDomain.ChallengeStore,
+	apps authnDomain.AppDirectory,
+) (*WebAuthnStrategy, error) {
 	wa, err := gowebauthn.New(&gowebauthn.Config{
 		RPID:          cfg.RPID,
 		RPDisplayName: cfg.RPDisplayName,
@@ -66,6 +73,7 @@ func NewWebAuthnStrategy(cfg WebAuthnConfig, credRepo authnDomain.CredentialRepo
 		credRepo:       credRepo,
 		identity:       identity,
 		challengeStore: store,
+		apps:           apps,
 	}, nil
 }
 
@@ -223,9 +231,13 @@ func (s *WebAuthnStrategy) authenticateViaRegistration(
 		return nil, err
 	}
 
+	tenantID, lookupErr := s.resolveTenant(ctx, req.AppID)
+	if lookupErr != nil {
+		return nil, lookupErr
+	}
 	info, createErr := s.identity.ProvisionExternalUser(ctx, &authnDomain.ProvisionExternalUserRequest{
 		AppID:             req.AppID,
-		TenantID:          "default",
+		TenantID:          tenantID,
 		Provider:          string(authnDomain.CredentialWebAuthn),
 		CredentialSubject: p.RawID,
 		PublicKey:         p.PublicKey,
@@ -240,6 +252,16 @@ func (s *WebAuthnStrategy) authenticateViaRegistration(
 		Subject:  p.RawID,
 		IsNew:    true,
 	}, nil
+}
+
+// resolveTenant looks up the tenant that owns the application via the
+// AppDirectory port. We require an AppDirectory to be wired so external
+// identities cannot leak across tenants under a hard-coded "default".
+func (s *WebAuthnStrategy) resolveTenant(ctx context.Context, appID shared.AppID) (shared.TenantID, error) {
+	if s.apps == nil {
+		return "", fmt.Errorf("webauthn: app directory not configured; cannot resolve tenant for app %s", appID)
+	}
+	return s.apps.TenantOf(ctx, appID)
 }
 
 // VerifyAndBind completes a WebAuthn registration (attestation) ceremony
