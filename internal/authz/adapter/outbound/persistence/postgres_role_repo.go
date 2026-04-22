@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/lib/pq"
 
 	"openiam/internal/authz/domain"
 	shared "openiam/internal/shared/domain"
@@ -326,14 +327,40 @@ func (r *PostgresRoleRepository) loadPermissions(ctx context.Context, conn sqlx.
 	return perms, nil
 }
 
+// hydrateRoles attaches permissions to a batch of roles in a single
+// round-trip. The previous implementation issued one SELECT per role,
+// which made the per-request authorization check (FindByUserAndApp)
+// scale linearly with the user's role count — e.g. an admin with 20
+// roles cost 21 queries on every IsAllowed call.
 func (r *PostgresRoleRepository) hydrateRoles(ctx context.Context, conn sqlx.ExtContext, rows []roleRow) ([]*domain.Role, error) {
+	if len(rows) == 0 {
+		return []*domain.Role{}, nil
+	}
+
+	ids := make([]string, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.ID)
+	}
+
+	var permRows []permissionRow
+	if err := sqlx.SelectContext(ctx, conn, &permRows,
+		`SELECT role_id, resource, action FROM role_permissions WHERE role_id = ANY($1)`,
+		pq.Array(ids),
+	); err != nil {
+		return nil, err
+	}
+
+	permsByRole := make(map[string][]domain.Permission, len(rows))
+	for _, p := range permRows {
+		permsByRole[p.RoleID] = append(permsByRole[p.RoleID], domain.Permission{
+			Resource: p.Resource,
+			Action:   p.Action,
+		})
+	}
+
 	roles := make([]*domain.Role, 0, len(rows))
 	for _, row := range rows {
-		perms, err := r.loadPermissions(ctx, conn, row.ID)
-		if err != nil {
-			return nil, err
-		}
-		roles = append(roles, rowToRole(row, perms))
+		roles = append(roles, rowToRole(row, permsByRole[row.ID]))
 	}
 	return roles, nil
 }
