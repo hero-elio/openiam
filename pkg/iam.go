@@ -114,7 +114,13 @@ func WithLogger(logger *slog.Logger) Option {
 func WithIdentity() Option {
 	return func(e *Engine) error {
 		e.ensureDefaults()
-		e.Identity = identity.NewRegistry(e.Deps.DB, e.Deps.EventBus, e.Deps.TxManager, e.checkerOrNil())
+		e.Identity = identity.NewRegistry(
+			e.Deps.DB,
+			e.Deps.EventBus,
+			e.Deps.TxManager,
+			e.checkerOrNil(),
+			e.scopeValidatorOrNil(),
+		)
 		return nil
 	}
 }
@@ -167,6 +173,7 @@ func WithTenant() Option {
 	return func(e *Engine) error {
 		e.ensureDefaults()
 		e.Tenant = tenant.NewManager(e.Deps.DB, e.Deps.EventBus, e.Deps.TxManager, e.checkerOrNil())
+		e.lateBindScopeValidator()
 		return nil
 	}
 }
@@ -241,6 +248,13 @@ func (e *Engine) checkerOrNil() func(ctx context.Context, resource, action strin
 	return nil
 }
 
+func (e *Engine) scopeValidatorOrNil() *tenant.ScopeAdapter {
+	if e.Tenant == nil {
+		return nil
+	}
+	return tenant.NewScopeAdapter(e.Tenant)
+}
+
 func (e *Engine) ensureDefaults() {
 	if e.Deps.Logger == nil {
 		e.Deps.Logger = slog.Default()
@@ -259,9 +273,24 @@ func (e *Engine) lateBindChecker() {
 	check := e.Authz.Checker
 
 	if e.Identity != nil && e.Identity.Handler == nil {
-		e.Identity = identity.NewRegistry(e.Deps.DB, e.Deps.EventBus, e.Deps.TxManager, check)
+		e.Identity = identity.NewRegistry(e.Deps.DB, e.Deps.EventBus, e.Deps.TxManager, check, e.scopeValidatorOrNil())
 	}
 	if e.Tenant != nil && e.Tenant.Handler == nil {
 		e.Tenant = tenant.NewManager(e.Deps.DB, e.Deps.EventBus, e.Deps.TxManager, check)
 	}
+}
+
+// lateBindScopeValidator rewires Identity to pick up the tenant scope
+// validator when WithTenant is applied after WithIdentity.
+func (e *Engine) lateBindScopeValidator() {
+	if e.Tenant == nil || e.Identity == nil {
+		return
+	}
+	e.Identity = identity.NewRegistry(
+		e.Deps.DB,
+		e.Deps.EventBus,
+		e.Deps.TxManager,
+		e.checkerOrNil(),
+		e.scopeValidatorOrNil(),
+	)
 }

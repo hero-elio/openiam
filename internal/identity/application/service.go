@@ -25,14 +25,36 @@ type IdentityService struct {
 	userRepo  domain.UserRepository
 	eventBus  shared.EventBus
 	txManager shared.TxManager
+	scopes    domain.ScopeValidator
 }
 
-func NewIdentityService(userRepo domain.UserRepository, eventBus shared.EventBus, txManager shared.TxManager) *IdentityService {
-	return &IdentityService{
+type Option func(*IdentityService)
+
+// WithScopeValidator wires in a tenant/application existence check so
+// RegisterUser / RegisterExternalUser refuse to create rows pointing at
+// tenants or apps that do not exist. When omitted (e.g. in tests) the
+// service falls back to format-only validation.
+func WithScopeValidator(v domain.ScopeValidator) Option {
+	return func(s *IdentityService) {
+		s.scopes = v
+	}
+}
+
+func NewIdentityService(
+	userRepo domain.UserRepository,
+	eventBus shared.EventBus,
+	txManager shared.TxManager,
+	opts ...Option,
+) *IdentityService {
+	s := &IdentityService{
 		userRepo:  userRepo,
 		eventBus:  eventBus,
 		txManager: txManager,
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 func (s *IdentityService) RegisterUser(ctx context.Context, cmd *command.RegisterUser) (shared.UserID, error) {
@@ -43,6 +65,12 @@ func (s *IdentityService) RegisterUser(ctx context.Context, cmd *command.Registe
 
 	tenantID := shared.TenantID(cmd.TenantID)
 	appID := shared.AppID(cmd.AppID)
+	if tenantID.IsEmpty() || appID.IsEmpty() {
+		return "", shared.ErrInvalidInput
+	}
+	if err := s.ensureScope(ctx, tenantID, appID); err != nil {
+		return "", err
+	}
 
 	exists, err := s.userRepo.ExistsByEmail(ctx, tenantID, email)
 	if err != nil {
@@ -76,10 +104,16 @@ func (s *IdentityService) RegisterUser(ctx context.Context, cmd *command.Registe
 
 func (s *IdentityService) RegisterExternalUser(ctx context.Context, cmd *command.RegisterExternalUser) (shared.UserID, error) {
 	tenantID := shared.TenantID(cmd.TenantID)
-	if tenantID == "" {
-		tenantID = "default"
-	}
 	appID := shared.AppID(cmd.AppID)
+	if tenantID.IsEmpty() || appID.IsEmpty() {
+		return "", shared.ErrInvalidInput
+	}
+	if cmd.Provider == "" || cmd.CredentialSubject == "" {
+		return "", shared.ErrInvalidInput
+	}
+	if err := s.ensureScope(ctx, tenantID, appID); err != nil {
+		return "", err
+	}
 
 	user := domain.NewExternalUser(tenantID, appID, cmd.Provider, cmd.CredentialSubject, cmd.PublicKey)
 
@@ -154,6 +188,16 @@ func (s *IdentityService) FindByEmail(ctx context.Context, tenantID shared.Tenan
 		return nil, err
 	}
 	return toUserDTO(user), nil
+}
+
+func (s *IdentityService) ensureScope(ctx context.Context, tenantID shared.TenantID, appID shared.AppID) error {
+	if s.scopes == nil {
+		return nil
+	}
+	if err := s.scopes.EnsureTenant(ctx, tenantID); err != nil {
+		return err
+	}
+	return s.scopes.EnsureApplication(ctx, tenantID, appID)
 }
 
 func toUserDTO(u *domain.User) *UserDTO {

@@ -16,11 +16,15 @@ func NewAppID() AppID               { return AppID(uuid.New().String()) }
 func NewSessionID() SessionID       { return SessionID(uuid.New().String()) }
 func NewCredentialID() CredentialID { return CredentialID(uuid.New().String()) }
 
-func (id UserID) String() string       { return string(id) }
-func (id UserID) IsEmpty() bool        { return id == "" }
-func (id TenantID) String() string     { return string(id) }
-func (id TenantID) IsEmpty() bool      { return id == "" }
-func (id RoleID) String() string       { return string(id) }
-func (id AppID) String() string        { return string(id) }
-func (id SessionID) String() string    { return string(id) }
-func (id CredentialID) String() string { return string(id) }
+func (id UserID) String() string           { return string(id) }
+func (id UserID) IsEmpty() bool            { return id == "" }
+func (id TenantID) String() string         { return string(id) }
+func (id TenantID) IsEmpty() bool          { return id == "" }
+func (id RoleID) String() string           { return string(id) }
+func (id RoleID) IsEmpty() bool            { return id == "" }
+func (id AppID) String() string            { return string(id) }
+func (id AppID) IsEmpty() bool             { return id == "" }
+func (id SessionID) String() string        { return string(id) }
+func (id SessionID) IsEmpty() bool         { return id == "" }
+func (id CredentialID) String() string     { return string(id) }
+func (id CredentialID) IsEmpty() bool      { return id == "" }

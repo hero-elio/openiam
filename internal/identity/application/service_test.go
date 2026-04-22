@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"openiam/internal/identity/application/command"
@@ -138,15 +139,18 @@ func TestIdentityService_RegisterExternalUser_ReturnsExistingUser(t *testing.T) 
 	}
 }
 
-func TestIdentityService_RegisterExternalUser_DefaultTenantAndPublishes(t *testing.T) {
+func TestIdentityService_RegisterExternalUser_PersistsAndPublishes(t *testing.T) {
 	repo := &fakeUserRepo{}
 	bus := &fakeEventBus{}
 	tx := &fakeTxManager{}
 	svc := NewIdentityService(repo, bus, tx)
 
+	tenantID := shared.NewTenantID()
+	appID := shared.NewAppID()
+
 	userID, err := svc.RegisterExternalUser(context.Background(), &command.RegisterExternalUser{
-		AppID:             shared.NewAppID().String(),
-		TenantID:          "",
+		AppID:             appID.String(),
+		TenantID:          tenantID.String(),
 		Provider:          "webauthn",
 		CredentialSubject: "cred-subject",
 		PublicKey:         "pk",
@@ -163,11 +167,32 @@ func TestIdentityService_RegisterExternalUser_DefaultTenantAndPublishes(t *testi
 	if repo.saved == nil {
 		t.Fatal("user should be saved")
 	}
-	if repo.saved.TenantID != shared.TenantID("default") {
-		t.Fatalf("expected default tenant, got %q", repo.saved.TenantID)
+	if repo.saved.TenantID != tenantID {
+		t.Fatalf("expected tenant %q, got %q", tenantID, repo.saved.TenantID)
 	}
 	if len(bus.published) != 1 {
 		t.Fatalf("expected one published event, got %d", len(bus.published))
+	}
+}
+
+func TestIdentityService_RegisterExternalUser_RejectsEmptyTenant(t *testing.T) {
+	repo := &fakeUserRepo{}
+	bus := &fakeEventBus{}
+	tx := &fakeTxManager{}
+	svc := NewIdentityService(repo, bus, tx)
+
+	_, err := svc.RegisterExternalUser(context.Background(), &command.RegisterExternalUser{
+		AppID:             shared.NewAppID().String(),
+		TenantID:          "",
+		Provider:          "webauthn",
+		CredentialSubject: "cred-subject",
+		PublicKey:         "pk",
+	})
+	if !errors.Is(err, shared.ErrInvalidInput) {
+		t.Fatalf("expected ErrInvalidInput, got %v", err)
+	}
+	if repo.saved != nil {
+		t.Fatal("user should not be saved when input is invalid")
 	}
 }
 

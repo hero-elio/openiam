@@ -102,7 +102,7 @@ func TestE2E_TenantAuthzIdentityFlow(t *testing.T) {
 		t.Fatalf("init authz: %v", err)
 	}
 	tenantMgr := tenant.NewManager(db, bus, txMgr, nil)
-	identityReg := identity.NewRegistry(db, bus, txMgr, nil)
+	identityReg := identity.NewRegistry(db, bus, txMgr, nil, tenant.NewScopeAdapter(tenantMgr))
 
 	ctx := context.Background()
 	tenantID, err := tenantMgr.Service.CreateTenant(ctx, &tenantCmd.CreateTenant{Name: "acme"})

@@ -9,6 +9,7 @@ import (
 	"openiam/internal/identity/adapter/inbound/rest"
 	identityPersistence "openiam/internal/identity/adapter/outbound/persistence"
 	"openiam/internal/identity/application"
+	identityDomain "openiam/internal/identity/domain"
 )
 
 type Registry struct {
@@ -16,9 +17,20 @@ type Registry struct {
 	Handler *rest.Handler
 }
 
-func NewRegistry(db *sqlx.DB, bus shared.EventBus, txMgr shared.TxManager, check sharedAuth.Checker) *Registry {
+func NewRegistry(
+	db *sqlx.DB,
+	bus shared.EventBus,
+	txMgr shared.TxManager,
+	check sharedAuth.Checker,
+	scopes identityDomain.ScopeValidator,
+) *Registry {
 	userRepo := identityPersistence.NewPostgresUserRepository(db)
-	svc := application.NewIdentityService(userRepo, bus, txMgr)
+
+	var opts []application.Option
+	if scopes != nil {
+		opts = append(opts, application.WithScopeValidator(scopes))
+	}
+	svc := application.NewIdentityService(userRepo, bus, txMgr, opts...)
 
 	var handler *rest.Handler
 	if check != nil {
