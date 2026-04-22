@@ -45,3 +45,14 @@ func WithRegistrar(r domain.UserRegistrar) Option {
 		return nil
 	}
 }
+
+// WithUserInfoProvider lets AuthnAppService.AuthenticateToken consult the
+// identity context for the caller's current status (active / disabled /
+// locked). When omitted, the token signature/expiry are still checked but
+// account-state revocation requires the token to expire on its own.
+func WithUserInfoProvider(p domain.UserInfoProvider) Option {
+	return func(svc *AuthnAppService) error {
+		svc.userInfo = p
+		return nil
+	}
+}

@@ -15,17 +15,15 @@ import (
 	"openiam/internal/authn/domain"
 	identityDomain "openiam/internal/identity/domain"
 	sharedAuth "openiam/internal/shared/auth"
-	shared "openiam/internal/shared/domain"
 )
 
 type Handler struct {
 	svc           *application.AuthnAppService
 	tokenProvider domain.TokenProvider
-	userInfo      domain.UserInfoProvider
 }
 
-func NewHandler(svc *application.AuthnAppService, tokenProvider domain.TokenProvider, userInfo domain.UserInfoProvider) *Handler {
-	return &Handler{svc: svc, tokenProvider: tokenProvider, userInfo: userInfo}
+func NewHandler(svc *application.AuthnAppService, tokenProvider domain.TokenProvider) *Handler {
+	return &Handler{svc: svc, tokenProvider: tokenProvider}
 }
 
 func (h *Handler) Routes() chi.Router {
@@ -54,43 +52,32 @@ func (h *Handler) AuthMiddleware(next http.Handler) http.Handler {
 			writeError(w, http.StatusUnauthorized, "unauthorized", "missing bearer token")
 			return
 		}
-		tc, err := h.tokenProvider.Validate(raw)
+		// All token + account-state policy lives in the application layer
+		// so gRPC / internal RPC adapters can share the same gate without
+		// re-implementing it. We only translate the resulting error into
+		// HTTP status here.
+		claims, err := h.svc.AuthenticateToken(r.Context(), raw)
 		if err != nil {
-			writeError(w, http.StatusUnauthorized, "unauthorized", "invalid token")
+			writeAuthError(w, err)
 			return
 		}
-		// A valid JWT only proves we issued it; it cannot tell us whether
-		// the user has since been disabled or locked. Re-check status on
-		// every request so admin-initiated bans take effect immediately
-		// instead of waiting for the token to expire.
-		if h.userInfo != nil {
-			info, infoErr := h.userInfo.GetUserInfo(r.Context(), shared.UserID(tc.UserID))
-			if infoErr != nil {
-				writeError(w, http.StatusUnauthorized, "unauthorized", "invalid token")
-				return
-			}
-			switch info.Status {
-			case "active":
-			case "disabled":
-				writeError(w, http.StatusForbidden, "user_disabled", "account is disabled")
-				return
-			case "locked":
-				writeError(w, http.StatusForbidden, "user_locked", "account is locked")
-				return
-			default:
-				writeError(w, http.StatusForbidden, "user_inactive", "account is not active")
-				return
-			}
-		}
-		ctx := sharedAuth.ContextWithClaims(r.Context(), sharedAuth.Claims{
-			UserID:    tc.UserID,
-			TenantID:  tc.TenantID,
-			AppID:     tc.AppID,
-			SessionID: tc.SessionID,
-			Roles:     tc.Roles,
-		})
-		next.ServeHTTP(w, r.WithContext(ctx))
+		next.ServeHTTP(w, r.WithContext(sharedAuth.ContextWithClaims(r.Context(), claims)))
 	})
+}
+
+func writeAuthError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, identityDomain.ErrUserDisabled):
+		writeError(w, http.StatusForbidden, "user_disabled", "account is disabled")
+	case errors.Is(err, identityDomain.ErrUserLocked):
+		writeError(w, http.StatusForbidden, "user_locked", "account is locked")
+	case errors.Is(err, identityDomain.ErrUserNotFound):
+		writeError(w, http.StatusUnauthorized, "unauthorized", "invalid token")
+	case errors.Is(err, domain.ErrTokenExpired):
+		writeError(w, http.StatusUnauthorized, "token_expired", "token has expired")
+	default:
+		writeError(w, http.StatusUnauthorized, "unauthorized", "invalid token")
+	}
 }
 
 func (h *Handler) handleRegister(w http.ResponseWriter, r *http.Request) {

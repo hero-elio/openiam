@@ -10,6 +10,8 @@ import (
 	"openiam/internal/authn/application/command"
 	"openiam/internal/authn/application/query"
 	"openiam/internal/authn/domain"
+	identityDomain "openiam/internal/identity/domain"
+	sharedAuth "openiam/internal/shared/auth"
 	shared "openiam/internal/shared/domain"
 )
 
@@ -33,6 +35,7 @@ type AuthnAppService struct {
 	tokenProvider domain.TokenProvider
 	eventBus      shared.EventBus
 	registrar     domain.UserRegistrar
+	userInfo      domain.UserInfoProvider
 	sessionTTL    time.Duration
 	logger        *slog.Logger
 }
@@ -65,6 +68,54 @@ func NewAuthnAppService(
 		return nil, fmt.Errorf("at least one authn strategy is required")
 	}
 	return svc, nil
+}
+
+// AuthenticateToken validates a bearer token and returns the caller's claims.
+//
+// This is the protocol-agnostic entry point: HTTP middleware, gRPC
+// interceptors, internal RPC handlers — anything that needs to turn a raw
+// access token into authenticated context — should go through here so the
+// rules (signature, expiry, account status) stay in one place.
+//
+// Returned errors are domain errors (ErrInvalidToken, ErrUserDisabled,
+// ErrUserLocked, …) so each transport can translate them to its own
+// status convention without duplicating policy.
+func (s *AuthnAppService) AuthenticateToken(ctx context.Context, rawToken string) (sharedAuth.Claims, error) {
+	if rawToken == "" {
+		return sharedAuth.Claims{}, domain.ErrInvalidToken
+	}
+	tc, err := s.tokenProvider.Validate(rawToken)
+	if err != nil {
+		return sharedAuth.Claims{}, err
+	}
+
+	// A valid JWT only proves we issued it; it cannot tell us whether the
+	// user has since been disabled or locked. Re-check status on every
+	// request so admin-initiated bans take effect immediately instead of
+	// waiting for the token to expire.
+	if s.userInfo != nil {
+		info, infoErr := s.userInfo.GetUserInfo(ctx, shared.UserID(tc.UserID))
+		if infoErr != nil {
+			return sharedAuth.Claims{}, infoErr
+		}
+		switch info.Status {
+		case string(identityDomain.UserStatusActive):
+		case string(identityDomain.UserStatusDisabled):
+			return sharedAuth.Claims{}, identityDomain.ErrUserDisabled
+		case string(identityDomain.UserStatusLocked):
+			return sharedAuth.Claims{}, identityDomain.ErrUserLocked
+		default:
+			return sharedAuth.Claims{}, identityDomain.ErrUserDisabled
+		}
+	}
+
+	return sharedAuth.Claims{
+		UserID:    tc.UserID,
+		TenantID:  tc.TenantID,
+		AppID:     tc.AppID,
+		SessionID: tc.SessionID,
+		Roles:     tc.Roles,
+	}, nil
 }
 
 func (s *AuthnAppService) Login(ctx context.Context, cmd *command.Login) (*domain.TokenPair, error) {

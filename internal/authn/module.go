@@ -85,6 +85,7 @@ func NewAuthenticator(cfg Config, deps AuthenticatorDeps) (*Authenticator, error
 	opts := []authnApp.Option{
 		authnApp.WithPasswordAuth(deps.Credentials, id),
 		authnApp.WithRegistrar(id),
+		authnApp.WithUserInfoProvider(id),
 	}
 
 	if cfg.SIWEDomain != "" {
@@ -123,7 +124,7 @@ func NewAuthenticator(cfg Config, deps AuthenticatorDeps) (*Authenticator, error
 		return nil, fmt.Errorf("register authn event subscriber: %w", err)
 	}
 
-	handler := authnRest.NewHandler(svc, deps.TokenProvider, deps.Identity)
+	handler := authnRest.NewHandler(svc, deps.TokenProvider)
 
 	return &Authenticator{
 		Service:       svc,
