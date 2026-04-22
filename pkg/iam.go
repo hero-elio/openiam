@@ -223,6 +223,12 @@ func (e *Engine) Handler() http.Handler {
 	r.Get("/readyz", e.handleReadyz)
 
 	r.Route("/api/v1", func(api chi.Router) {
+		// Cap request bodies before any handler reads them, so a
+		// streaming attack can't OOM us by feeding json.Decode a
+		// gigabyte payload. The cap applies to every API route
+		// (auth + protected) — health endpoints stay unrestricted.
+		api.Use(mw.BodyLimit(mw.DefaultMaxRequestBodyBytes))
+
 		if e.Authn != nil && e.Authn.Handler != nil {
 			api.Mount("/auth", e.Authn.Handler.Routes())
 			r.Mount("/__test/authn", http.StripPrefix("/__test/authn", testAuthnPageHandler()))
